@@ -28,8 +28,12 @@ jobs:
       - name: Build
         run: forge build --sizes
 
-      - name: Test
+      - name: Test (fails if gas snapshots change)
         run: forge test -vvv
+        env:
+          FORGE_SNAPSHOT_CHECK: true
+          # Optional: the Sepolia ENSv2 fork test runs only when this secret is set.
+          SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
 
       - name: Canonical build check
         run: ./script/verify-canonical-build.sh
