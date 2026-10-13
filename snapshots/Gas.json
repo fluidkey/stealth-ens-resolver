@@ -1,0 +1,10 @@
+{
+  "PermissionedResolver_text_direct_reference": "3260",
+  "resolveStealthCallback_unverified": "6729",
+  "resolveStealthCallback_verified_mockVerifier": "23129",
+  "resolve_forwardedText_PermissionedResolver": "53092",
+  "resolve_registeredAddr_offchainLookup": "15595",
+  "resolve_wildcardAddr_offchainLookup": "21702",
+  "setConfig_recordsResolver_oneUrl": "139526",
+  "verifyStealthResolution_mockVerifier": "20045"
+}
