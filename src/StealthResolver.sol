@@ -145,6 +145,10 @@ contract StealthResolver is
     ///      implementation-defined. Allowed for whoever may set `name`'s resolver in the ENSv2
     ///      registry (see `canSetConfig`). Empty `urls` / zero `recordsResolver` inherit
     ///      the nearest ancestor's on the `resolve()` path.
+    ///
+    ///      Config is keyed by node and outlives a registration: when a name expires and is
+    ///      registered again, the previous holder's config applies until the new holder calls
+    ///      this. Call it before pointing a name at this resolver.
     /// @param name The DNS-encoded name.
     /// @param recordsResolver The resolver holding the name's records.
     /// @param urls ERC-3668 gateway URLs for stealth address resolution.

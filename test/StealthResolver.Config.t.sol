@@ -112,6 +112,44 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         resolver.setConfig(dns("alice.fkey.eth"), address(resolver), new string[](0));
     }
 
+    /// @dev Zero records resolver and empty URLs fall back to the nearest ancestor's.
+    function test_setConfig_clearFallsBackToInherited() public {
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "https://alice.gw");
+        setConfig(alice, "alice.fkey.eth", address(0), "");
+        (address r,) = resolver.getResolver(dns("alice.fkey.eth"));
+        assertEq(r, address(fkeyRecords));
+        bytes memory v = resolver.resolve(
+            dns("alice.fkey.eth"), abi.encodeCall(IStealthResolver.gatewayURLs, (aliceNode))
+        );
+        assertEq(abi.decode(v, (string[]))[0], STEALTH_GW);
+    }
+
+    /// @dev Config is keyed by node and outlives a registration: after expiry and registration to
+    ///      someone else, the previous holder's config applies until the new holder replaces it.
+    function test_setConfig_survivesReregistration() public {
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "https://alice.gw");
+        ethRegistry.grantRootRoles(RegistryRolesLib.ROLE_RENEW, address(this));
+        ethRegistry.renew(uint256(keccak256("fkey")), expiry + 1000 days);
+        vm.warp(expiry);
+        address carol = makeAddr("carol");
+        vm.prank(fluidkey);
+        fkeyRegistry.register(
+            "alice",
+            carol,
+            IRegistry(address(0)),
+            address(resolver),
+            RegistryRolesLib.ROLE_SET_RESOLVER,
+            expiry + 365 days
+        );
+        assertFalse(resolver.canSetConfig(dns("alice.fkey.eth"), alice), "old holder");
+        (address r,) = resolver.getResolver(dns("alice.fkey.eth"));
+        assertEq(r, address(aliceRecords), "previous holder's config still applies");
+
+        setConfig(carol, "alice.fkey.eth", address(0), "");
+        (r,) = resolver.getResolver(dns("alice.fkey.eth"));
+        assertEq(r, address(fkeyRecords), "new holder replaced it");
+    }
+
     function test_setConfig_expiredNameReverts() public {
         vm.warp(expiry);
         assertFalse(resolver.canSetConfig(dns("alice.fkey.eth"), alice));
