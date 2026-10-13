@@ -83,7 +83,7 @@ contract StealthResolver is
     /// @notice The config of `node` changed.
     event ConfigChanged(bytes32 indexed node, bytes name, address recordsResolver, string[] urls);
 
-    /// @notice `account` may not set the resolver of `name` in the ENSv2 registry.
+    /// @notice `account` may not set the config of `name`.
     error Unauthorized(bytes name, address account);
 
     /// @notice The node in the resolver calldata is not the namehash of the DNS-encoded name.
@@ -158,13 +158,14 @@ contract StealthResolver is
 
     /// @notice Whether `account` may set the config of `name`: the same rule as
     ///         `PermissionedRegistry.setResolver`, i.e. `ROLE_SET_RESOLVER` on the name's token in
-    ///         its parent registry (resource or registry-wide), name not expired.
+    ///         its parent registry (resource or registry-wide), name not expired. Top-level
+    ///         names are excluded: their config would reach every name below them.
     /// @param name The DNS-encoded name.
     /// @param account The account to check.
     function canSetConfig(bytes memory name, address account) public view returns (bool) {
         IRegistry parent = LibRegistry.findParentRegistry(ROOT_REGISTRY, name, 0);
         if (
-            address(parent) == address(0)
+            address(parent) == address(0) || parent == ROOT_REGISTRY
                 || !ERC165Checker.supportsInterface(
                     address(parent), type(IPermissionedRegistry).interfaceId
                 )

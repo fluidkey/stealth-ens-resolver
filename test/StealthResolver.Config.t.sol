@@ -97,6 +97,15 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         assertTrue(resolver.canSetConfig(dns("dave.custodial.eth"), fluidkey));
     }
 
+    /// @dev A top-level name's config would reach every name below it that has none of its own.
+    function test_setConfig_topLevelNameRefused() public {
+        assertFalse(resolver.canSetConfig(dns("eth"), address(this)));
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.Unauthorized.selector, dns("eth"), address(this))
+        );
+        resolver.setConfig(dns("eth"), address(fkeyRecords), urls("https://eth.gw"));
+    }
+
     function test_setConfig_expiredNameReverts() public {
         vm.warp(expiry);
         assertFalse(resolver.canSetConfig(dns("alice.fkey.eth"), alice));

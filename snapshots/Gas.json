@@ -5,6 +5,6 @@
   "resolve_forwardedText_PermissionedResolver": "53092",
   "resolve_registeredAddr_offchainLookup": "15595",
   "resolve_wildcardAddr_offchainLookup": "21702",
-  "setConfig_recordsResolver_oneUrl": "139526",
+  "setConfig_recordsResolver_oneUrl": "139590",
   "verifyStealthResolution_mockVerifier": "19363"
 }
