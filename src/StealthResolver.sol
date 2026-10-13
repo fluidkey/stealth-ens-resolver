@@ -71,6 +71,9 @@ contract StealthResolver is
     /// @notice Batch gateways for forwarded and multicall lookups (ENS runs one per chain).
     IGatewayProvider public immutable BATCH_GATEWAY_PROVIDER;
 
+    /// @dev The verifier's scheme ID, read once at deployment: one scheme per resolver, for good.
+    uint256 private immutable _SCHEME_ID;
+
     mapping(bytes32 node => Config) private _configs;
 
     ////////////////////////////////////////////////////////////////////////
@@ -113,6 +116,7 @@ contract StealthResolver is
         ROOT_REGISTRY = rootRegistry;
         VERIFIER = verifier;
         BATCH_GATEWAY_PROVIDER = batchGatewayProvider;
+        _SCHEME_ID = verifier.schemeId();
     }
 
     /// @inheritdoc ERC165
@@ -189,9 +193,9 @@ contract StealthResolver is
     ////////////////////////////////////////////////////////////////////////
 
     /// @inheritdoc IStealthResolver
-    /// @dev ENSIP-30 Section 5. Forwards to the immutable verifier.
+    /// @dev ENSIP-30 Section 5. The verifier's scheme ID, fixed at deployment.
     function schemeId() public view returns (uint256) {
-        return VERIFIER.schemeId();
+        return _SCHEME_ID;
     }
 
     /// @inheritdoc IStealthResolver
@@ -397,7 +401,7 @@ contract StealthResolver is
     function _stealthKey(uint256 coinType) internal view returns (string memory) {
         return string.concat(
             "stealth-meta-address[",
-            Strings.toString(schemeId()),
+            Strings.toString(_SCHEME_ID),
             "][",
             Strings.toString(coinType),
             "]"

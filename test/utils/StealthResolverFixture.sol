@@ -119,7 +119,7 @@ abstract contract StealthResolverFixture is V1Fixture, V2Fixture, CCIPClient {
     function stealthKey(uint256 coinType) internal view returns (string memory) {
         return string.concat(
             "stealth-meta-address[",
-            vm.toString(verifier.schemeId()),
+            vm.toString(resolver.schemeId()),
             "][",
             vm.toString(coinType),
             "]"

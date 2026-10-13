@@ -32,10 +32,12 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         assertFalse(resolver.supportsFeature(ResolverFeatures.SINGULAR));
     }
 
-    function test_schemeId_forwardsToVerifier() public {
+    /// @dev Read from the verifier once, at deployment: a verifier cannot change the scheme, and
+    ///      with it the record key, of a deployed resolver.
+    function test_schemeId_fixedAtDeployment() public {
         assertEq(resolver.schemeId(), 1);
         verifier.setSchemeId(42);
-        assertEq(resolver.schemeId(), 42);
+        assertEq(resolver.schemeId(), 1);
     }
 
     function test_setConfig_byOwner() public {
