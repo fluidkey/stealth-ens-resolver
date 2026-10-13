@@ -1,0 +1,132 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.25;
+
+import {EIP3668} from "@ens/contracts/ccipRead/EIP3668.sol";
+import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol";
+import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol";
+import {IRegistry} from "~src/registry/interfaces/IRegistry.sol";
+import {RegistryRolesLib} from "~src/registry/libraries/RegistryRolesLib.sol";
+
+import {StealthResolver} from "../src/StealthResolver.sol";
+import {StealthResolverFixture} from "./utils/StealthResolverFixture.sol";
+
+/// @dev State belongs to a registration: ENSv2 renews a name's EAC resource when an expired name is
+///      registered again, and StealthResolver keys all state by it.
+contract StealthResolverRegistrationTest is StealthResolverFixture {
+    bytes internal constant VD = hex"c0ffee";
+    address internal carol = makeAddr("carol");
+    address internal attacker = makeAddr("attacker");
+
+    function _record(string memory name) internal view returns (bytes memory) {
+        bytes memory v = resolver.resolve(
+            dns(name), abi.encodeCall(IDataResolver.data, (node(name), stealthKey(COIN_ETH)))
+        );
+        return abi.decode(v, (bytes));
+    }
+
+    /// @dev True if a lying gateway is accepted, i.e. the name resolves unverified.
+    function _unverified(string memory name) internal view returns (bool ok) {
+        EIP3668.Params memory p = expectLookup(
+            address(resolver),
+            abi.encodeCall(
+                resolver.resolve, (dns(name), abi.encodeCall(IAddrResolver.addr, (node(name))))
+            )
+        );
+        (ok,) = callback(p, abi.encode(attacker, VD));
+    }
+
+    /// @dev fkey.eth renewed, alice.fkey.eth expired and registered to `holder`.
+    function _reregisterAlice(address holder) internal {
+        ethRegistry.grantRootRoles(RegistryRolesLib.ROLE_RENEW, address(this));
+        ethRegistry.renew(uint256(keccak256("fkey")), expiry + 1000 days);
+        vm.warp(expiry);
+        vm.prank(fluidkey);
+        fkeyRegistry.register(
+            "alice",
+            holder,
+            IRegistry(address(0)),
+            address(resolver),
+            RegistryRolesLib.ROLE_SET_RESOLVER,
+            expiry + 365 days
+        );
+    }
+
+    function test_reregistration_dropsRecordAndConfig() public {
+        setUpAliceVerified(COIN_ETH);
+        _reregisterAlice(carol);
+        assertEq(_record("alice.fkey.eth").length, 0, "alice's record not served");
+        assertTrue(_unverified("alice.fkey.eth"), "nor verified against");
+        (address r,) = resolver.getResolver(dns("alice.fkey.eth"));
+        assertEq(r, address(fkeyRecords), "alice's config not read");
+
+        setRecord(carol, "alice.fkey.eth", COIN_ETH, META);
+        assertEq(_record("alice.fkey.eth"), META);
+        assertFalse(_unverified("alice.fkey.eth"), "carol's record verifies");
+    }
+
+    /// @dev The same holder registering their expired name again starts from empty state too.
+    function test_reregistration_sameHolderStartsEmpty() public {
+        setUpAliceVerified(COIN_ETH);
+        _reregisterAlice(alice);
+        assertEq(_record("alice.fkey.eth").length, 0);
+    }
+
+    /// @dev The node-based ENSIP-30 Section 5 functions cannot walk the registry: they see the
+    ///      previous holder's state until the new holder writes.
+    function test_reregistration_nodeFunctionsLag() public {
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "https://alice.gw");
+        setRecord(alice, "alice.fkey.eth", COIN_ETH, META);
+        address derived = verifier.derive(metaWithoutFlag(), VD);
+        _reregisterAlice(carol);
+        assertEq(resolver.verifyStealthResolution(aliceNode, COIN_ETH, derived, VD), derived);
+        assertEq(resolver.gatewayURLs(aliceNode)[0], "https://alice.gw");
+
+        setRecord(carol, "alice.fkey.eth", COIN_ETH, "");
+        setConfig(carol, "alice.fkey.eth", address(0), "");
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, aliceNode, COIN_ETH)
+        );
+        resolver.verifyStealthResolution(aliceNode, COIN_ETH, derived, VD);
+        assertEq(resolver.gatewayURLs(aliceNode).length, 0);
+    }
+
+    /// @dev Re-registering the parent drops everything written under its authority: config and
+    ///      every wildcard username's record.
+    function test_parentReregistration_dropsUsernames() public {
+        setRecord(fluidkey, "bob.fkey.eth", COIN_ETH, META);
+        vm.warp(expiry);
+        ethRegistry.register(
+            "fkey", carol, fkeyRegistry, address(resolver), _ethTokenRoles(), expiry + 365 days
+        );
+        assertEq(_record("bob.fkey.eth").length, 0, "bob's record not served");
+        (address r,) = resolver.getResolver(dns("bob.fkey.eth"));
+        assertEq(r, address(0), "fkey.eth's config not read");
+        assertTrue(resolver.canSetStealthRecord(dns("bob.fkey.eth"), carol), "new holder writes");
+        assertFalse(resolver.canSetStealthRecord(dns("bob.fkey.eth"), fluidkey));
+    }
+
+    /// @dev An expired name that is not registered again is a wildcard name of its parent, as
+    ///      the UniversalResolver routes it: the parent's config and records apply, not its own.
+    function test_expiredName_fallsBackToParent() public {
+        setUpAliceVerified(COIN_ETH);
+        ethRegistry.grantRootRoles(RegistryRolesLib.ROLE_RENEW, address(this));
+        ethRegistry.renew(uint256(keccak256("fkey")), expiry + 1000 days);
+        vm.warp(expiry);
+        assertEq(_record("alice.fkey.eth").length, 0, "alice's record not served");
+        (address r,) = resolver.getResolver(dns("alice.fkey.eth"));
+        assertEq(r, address(fkeyRecords));
+        assertTrue(resolver.canSetStealthRecord(dns("alice.fkey.eth"), fluidkey));
+        assertFalse(resolver.canSetStealthRecord(dns("alice.fkey.eth"), alice));
+    }
+
+    /// @dev Role changes regenerate the token but keep the resource: state is kept.
+    function test_roleChange_keepsState() public {
+        setUpAliceVerified(COIN_ETH);
+        uint256 tokenId = fkeyRegistry.getTokenId(uint256(keccak256("alice")));
+        vm.prank(alice);
+        fkeyRegistry.grantRoles(tokenId, RegistryRolesLib.ROLE_SET_RESOLVER, makeAddr("delegate"));
+        assertTrue(fkeyRegistry.getTokenId(uint256(keccak256("alice"))) != tokenId, "regenerated");
+        assertEq(_record("alice.fkey.eth"), META);
+        assertFalse(_unverified("alice.fkey.eth"));
+    }
+}

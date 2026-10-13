@@ -124,30 +124,6 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         assertEq(abi.decode(v, (string[]))[0], STEALTH_GW);
     }
 
-    /// @dev Config belongs to a registration: once the name expires and is registered to someone
-    ///      else, the previous holder's config is not read.
-    function test_setConfig_droppedOnReregistration() public {
-        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "https://alice.gw");
-        ethRegistry.grantRootRoles(RegistryRolesLib.ROLE_RENEW, address(this));
-        ethRegistry.renew(uint256(keccak256("fkey")), expiry + 1000 days);
-        vm.warp(expiry);
-        address carol = makeAddr("carol");
-        vm.prank(fluidkey);
-        fkeyRegistry.register(
-            "alice",
-            carol,
-            IRegistry(address(0)),
-            address(resolver),
-            RegistryRolesLib.ROLE_SET_RESOLVER,
-            expiry + 365 days
-        );
-        assertFalse(resolver.canSetConfig(dns("alice.fkey.eth"), alice), "old holder");
-        (address r,) = resolver.getResolver(dns("alice.fkey.eth"));
-        assertEq(r, address(fkeyRecords), "previous holder's config not read");
-        (address own,) = resolver.config(dns("alice.fkey.eth"));
-        assertEq(own, address(0));
-    }
-
     // Who may write the stealth record.
 
     function test_setStealthRecord_authority() public {
