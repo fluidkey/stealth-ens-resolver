@@ -23,8 +23,9 @@ what the ENSIP requires.
 ENSv2 registry ── resolver ──▶ StealthResolver (immutable, one per scheme)
                                  │   per name: records resolver, gateway URLs
           address, gateway set ──┼──▶ OffchainLookup → gateway → callback
-                                 │       verified:   meta-address read from the name's own records resolver
+                                 │       verified:   meta-address read onchain from the records resolver
                                  │       unverified: the scheme's verifier decides
+          stealth record ────────┼──▶ answered from that same onchain read
           everything else ───────┴──▶ forwarded unchanged to the records resolver
 ```
 
@@ -35,37 +36,70 @@ N's own value, otherwise the nearest ancestor's.
 
 | Query | Result |
 |---|---|
-| Address record, gateway URLs set | ERC-3668 lookup to the gateway. **Verified** if N's own records resolver holds the ENSIP record for the coin type: the verifier rederives the address and it must equal the gateway's. Otherwise **unverified**: the verifier decides. |
+| Address record, gateway URLs set | ERC-3668 lookup to the gateway. **Verified** if N's records resolver holds the ENSIP record for the coin type: the verifier rederives the address and it must equal the gateway's. Otherwise **unverified**: the verifier decides. |
 | Address record, no gateway URLs | Forwarded to the records resolver; zero if there is none. |
+| `data(node, "stealth-meta-address[<scheme>][<coinType>]")` | Answered by `StealthResolver` from the same onchain read the callback verifies against. |
 | Any other record | Forwarded to the records resolver, including offchain ones. |
 | `resolve(name, multicall(...))` | Answered as one batch (ERC-7996 `RESOLVE_MULTICALL`). |
 | `gatewayURLs(node)` | N's own URLs; through `resolve()`, the effective URLs. |
 | `getResolver(name)` (`ICompositeResolver`) | The records resolver, so apps know where to edit records. |
 
-Verified mode only reads the name's **own** records resolver. An inherited records resolver belongs to
-an ancestor, which would otherwise be trusted for safety. Names that are not in the registry
-therefore always resolve unverified.
+**The record served is the record verified.** Verification reads the record from N's records
+resolver, own or inherited, exactly as `resolve()` serves it. A wildcard username such as
+`bob.fkey.eth`, which exists only in the parent's gateway, resolves verified once the parent writes
+its record into the parent's records resolver under the username's node. A lying gateway then cannot
+redirect its payments.
 
-A records resolver without the ENSIP-24 `data()` profile has no record (unverified). One that reports
-the profile but reverts makes the resolution fail. Records that are only a flag byte, or set reserved
-flag bits, are rejected.
+The record is read onchain with `data(node, key)` on the records resolver, never through its
+gateway. A records resolver without the ENSIP-24 `data()` profile, such as an offchain resolver, has
+no record (unverified), and the record reads as empty through `resolve()` instead of being fetched
+offchain. One that reports the profile but reverts makes the resolution fail. Records that are only a
+flag byte, or set reserved flag bits, are rejected. Only the scheme's key in canonical form is the
+record; other spellings (`[060]`, `[0x3c]`) are ordinary data, forwarded.
+
+The record is read under N's own node. `PermissionedResolver` aliases apply to forwarded records but
+not to the stealth record, so write it under the name itself.
+
+`verifyStealthResolution(node, ...)` cannot walk a node to its ancestors, so it verifies names with
+their own records resolver only. Wildcard names are verified in the callback but revert
+`NoStealthRecord` there.
+
+**Privacy.** A single address lookup goes from the client to the stealth gateway. In
+`resolve(name, multicall(...))` every lookup is batched through ENS's batch gateway, as the
+UniversalResolver does for batched resolutions, so that gateway sees the stealth gateway's response,
+including `verificationData`.
 
 ### Who may configure a name
 
 `setConfig(name, recordsResolver, gatewayURLs)` is allowed for whoever may set the name's resolver in
 ENSv2: `ROLE_SET_RESOLVER` on the name's token in its parent registry, name not expired, the same
 check as `PermissionedRegistry.setResolver`. Choosing the records resolver is equivalent to choosing
-the resolver, so no one gains power they did not have. For verified mode the name's owner should be
-the only holder of that role.
+the resolver, so no one gains power they did not have. Top-level names cannot be configured: their
+config would reach every name below them. A name cannot use `StealthResolver` as its own records
+resolver.
+
+**Trust.** A name without its own config is governed entirely by its nearest configured ancestor:
+records, gateway and, in verified mode, the meta-address it is verified against. This is the ENSIP's
+trust model for wildcard names. A registered name escapes it by setting its own config, and its owner
+should then be the only holder of `ROLE_SET_RESOLVER` on it.
+
+**Re-registration.** Config is keyed by node and outlives a registration. When a name expires and is
+registered to someone else, the previous holder's config applies until the new holder calls
+`setConfig`. Registrars should not register a reused label with `StealthResolver` as its resolver
+before its new holder has configured it.
 
 ### Setting up a name for verified resolution
 
 1. Deploy (or reuse) a `PermissionedResolver` you administer, through ENS's `VerifiableFactory`.
 2. Write the meta-address record there: `setData(node, "stealth-meta-address[<scheme>][<coinType>]", value)`.
-3. Set the name's resolver in its ENSv2 registry to `StealthResolver`.
-4. `setConfig(name, yourRecordsResolver, gatewayURLs)`; leave `gatewayURLs` empty to use a parent's.
+3. `setConfig(name, yourRecordsResolver, gatewayURLs)`; leave `gatewayURLs` empty to use a parent's.
+4. Set the name's resolver in its ENSv2 registry to `StealthResolver`.
 
-Steps 1 and 2 can be one transaction (`initialize` takes setters); a smart account can batch all four.
+Configure before pointing the name, so that no earlier config applies in between. Steps 1 and 2 can
+be one transaction (`initialize` takes setters); a smart account can batch all four.
+
+For wildcard usernames under a parent, the parent writes each username's record into its own records
+resolver, which must hold records onchain (a `PermissionedResolver`, not an offchain resolver).
 
 ## Contracts
 
@@ -82,21 +116,21 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 17,709 | 6,867 |
+| `StealthResolver` | 18,391 | 6,185 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
 `eth_call` costs; verified-mode numbers use a mock verifier and exclude the scheme's curve arithmetic.
 
 | Path | Gas |
 |---|---|
-| `resolve` wildcard name, address, `OffchainLookup` revert | 21,702 |
-| `resolve` registered name, address, `OffchainLookup` revert | 15,595 |
-| `resolveStealthCallback`, unverified | 6,729 + verifier |
-| `resolveStealthCallback`, verified | 23,129 + verifier |
-| `verifyStealthResolution` | 20,045 + verifier |
-| `resolve` text, forwarded to a `PermissionedResolver` | 53,092 |
+| `resolve` wildcard name, address, `OffchainLookup` revert | 22,049 |
+| `resolve` registered name, address, `OffchainLookup` revert | 11,944 |
+| `resolveStealthCallback`, unverified (wildcard, record looked up in the parent's records resolver) | 40,448 + verifier |
+| `resolveStealthCallback`, verified | 30,461 + verifier |
+| `verifyStealthResolution` | 19,578 + verifier |
+| `resolve` text, forwarded to a `PermissionedResolver` | 45,137 |
 | `text` on the `PermissionedResolver` directly (reference) | 3,260 |
-| `setConfig`, records resolver and one URL (transaction) | 139,526 |
+| `setConfig`, records resolver and one URL (transaction) | 139,636 |
 
 ## Build and test
 
@@ -112,7 +146,7 @@ forge test
 
 Tests run on namechain's own ENSv1 and ENSv2 fixtures, including resolution through
 UniversalResolverV2. A fork test runs against ENS's ENSv2 deployment on Sepolia when
-`SEPOLIA_RPC_URL` is set:
+`SEPOLIA_RPC_URL` is set. It is pinned to a block, so the RPC must serve historical state:
 
 ```bash
 SEPOLIA_RPC_URL=<rpc> forge test --match-path "test/fork/*"
