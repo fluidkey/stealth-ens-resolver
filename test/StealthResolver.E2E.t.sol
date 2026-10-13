@@ -4,6 +4,7 @@ pragma solidity 0.8.25;
 import {IMulticallable} from "@ens/contracts/resolvers/IMulticallable.sol";
 import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol";
 import {IContentHashResolver} from "@ens/contracts/resolvers/profiles/IContentHashResolver.sol";
+import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol";
 import {ITextResolver} from "@ens/contracts/resolvers/profiles/ITextResolver.sol";
 
 import {StealthResolver} from "../src/StealthResolver.sol";
@@ -90,6 +91,30 @@ contract StealthResolverE2ETest is StealthResolverFixture {
             _ur("bob.fkey.eth", abi.encodeCall(IAddrResolver.addr, (bobNode)));
         assertTrue(ok);
         assertEq(abi.decode(result, (address)), gwClaimed);
+    }
+
+    /// @dev A username that exists only in Fluidkey's gateway, verified against the record
+    ///      Fluidkey published for it onchain; the record reads the same through the UR.
+    function test_ur_wildcardUsername_verified() public {
+        string memory key = stealthKey(COIN_ETH);
+        vm.prank(fluidkey);
+        fkeyRecords.setData(bobNode, key, META);
+
+        (bool ok, bytes memory result) =
+            _ur("bob.fkey.eth", abi.encodeCall(IDataResolver.data, (bobNode, key)));
+        assertTrue(ok);
+        assertEq(abi.decode(result, (bytes)), META, "record");
+
+        bytes memory data = abi.encodeCall(IAddrResolver.addr, (bobNode));
+        gwClaimed = verifier.derive(metaWithoutFlag(), VD);
+        gwVerificationData = VD;
+        (ok, result) = _ur("bob.fkey.eth", data);
+        assertTrue(ok, "honest gateway");
+        assertEq(abi.decode(result, (address)), gwClaimed);
+
+        gwClaimed = makeAddr("attacker");
+        (ok,) = _ur("bob.fkey.eth", data);
+        assertFalse(ok, "lying gateway does not resolve");
     }
 
     function test_ur_registeredName_verified() public {

@@ -18,9 +18,16 @@ import {StealthResolver} from "../src/StealthResolver.sol";
 import {MockOffchainRecords} from "./mocks/MockOffchainRecords.sol";
 import {StealthResolverFixture} from "./utils/StealthResolverFixture.sol";
 
-/// @dev Everything that is not a stealth address is forwarded, unchanged, to the effective
-///      records resolver: an unmodified PermissionedResolver, PublicResolverV2 or offchain resolver.
+/// @dev Everything that is not a stealth address or the stealth record is forwarded, unchanged,
+///      to the effective records resolver: an unmodified PermissionedResolver, PublicResolverV2 or
+///      offchain resolver. The stealth record is answered from the onchain read verification uses.
 contract StealthResolverForwardTest is StealthResolverFixture {
+    function _data(string memory name, string memory key) internal view returns (bytes memory) {
+        bytes memory v =
+            resolver.resolve(dns(name), abi.encodeCall(IDataResolver.data, (node(name), key)));
+        return abi.decode(v, (bytes));
+    }
+
     function _text(string memory name, string memory key) internal view returns (string memory) {
         bytes memory v =
             resolver.resolve(dns(name), abi.encodeCall(ITextResolver.text, (node(name), key)));
@@ -46,13 +53,81 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         assertEq(_text("bob.fkey.eth", "avatar"), "ipfs://bob");
     }
 
-    function test_dataRecordForwarded() public {
+    function test_stealthRecordServed() public {
         setUpAliceVerified(COIN_ETH);
-        bytes memory v = resolver.resolve(
-            dns("alice.fkey.eth"),
-            abi.encodeCall(IDataResolver.data, (aliceNode, stealthKey(COIN_ETH)))
+        assertEq(
+            _data("alice.fkey.eth", stealthKey(COIN_ETH)),
+            META,
+            "ENSIP-30 Section 1 record served through resolve()"
         );
-        assertEq(abi.decode(v, (bytes)), META, "ENSIP-30 Section 1 record served through resolve()");
+        assertEq(_data("alice.fkey.eth", stealthKey(COIN_BASE)).length, 0, "other coin type");
+    }
+
+    /// @dev A records resolver that answers offchain cannot serve the stealth record: it would come
+    ///      from its gateway and could not be verified onchain (ENSIP-30 Section 1, Storage). The
+    ///      record reads as absent, without a lookup; other data keys still go offchain.
+    function test_offchainRecordsResolver_noStealthRecord() public {
+        MockOffchainRecords offchain = new MockOffchainRecords();
+        vm.prank(fluidkey);
+        resolver.setConfig(dns("fkey.eth"), address(offchain), urls(STEALTH_GW));
+        assertEq(_data("bob.fkey.eth", stealthKey(COIN_ETH)).length, 0);
+        expectLookup(
+            address(resolver),
+            abi.encodeCall(
+                resolver.resolve,
+                (dns("bob.fkey.eth"), abi.encodeCall(IDataResolver.data, (bobNode, "other")))
+            )
+        );
+    }
+
+    /// @dev Only this scheme's key in canonical form is the record; anything else is forwarded.
+    function test_stealthKeyParsing() public {
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
+        string[7] memory others = [
+            "stealth-meta-address[1][060]",
+            "stealth-meta-address[1][0x3c]",
+            "stealth-meta-address[1][]",
+            "stealth-meta-address[1][60",
+            "stealth-meta-address[2][60]",
+            "stealth-meta-address[1][-60]",
+            // one past type(uint256).max
+            "stealth-meta-address[1][115792089237316195423570985008687907853269984665640564039457584007913129639936]"
+        ];
+        vm.startPrank(alice);
+        for (uint256 i; i < others.length; ++i) {
+            aliceRecords.setData(aliceNode, others[i], abi.encode(i));
+        }
+        vm.stopPrank();
+        for (uint256 i; i < others.length; ++i) {
+            assertEq(_data("alice.fkey.eth", others[i]), abi.encode(i), others[i]);
+        }
+
+        string memory maxKey = stealthKey(type(uint256).max);
+        vm.prank(alice);
+        aliceRecords.setData(aliceNode, maxKey, META);
+        assertEq(_data("alice.fkey.eth", maxKey), META, "largest coin type is the record");
+    }
+
+    function test_stealthRecord_nodeMustMatchName() public {
+        string memory key = stealthKey(COIN_ETH);
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NodeMismatch.selector, aliceNode, bobNode)
+        );
+        resolver.resolve(dns("bob.fkey.eth"), abi.encodeCall(IDataResolver.data, (aliceNode, key)));
+    }
+
+    /// @dev PermissionedResolver aliases apply to forwarded records but not to the stealth record,
+    ///      which is read under the name's own node for serving and verifying alike.
+    function test_alias_notAppliedToStealthRecord() public {
+        string memory key = stealthKey(COIN_ETH);
+        vm.startPrank(alice);
+        aliceRecords.setAlias(dns("alice.fkey.eth"), dns("alias.eth"));
+        aliceRecords.setData(node("alias.eth"), key, META);
+        aliceRecords.setText(node("alias.eth"), "url", "https://alias.example");
+        vm.stopPrank();
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
+        assertEq(_text("alice.fkey.eth", "url"), "https://alias.example", "alias applies");
+        assertEq(_data("alice.fkey.eth", key).length, 0, "not to the stealth record");
     }
 
     function test_addressWithoutGatewayForwarded() public {
@@ -79,6 +154,14 @@ contract StealthResolverForwardTest is StealthResolverFixture {
                 (bytes)
             ).length,
             0
+        );
+        string memory key = stealthKey(COIN_ETH);
+        assertEq(
+            abi.decode(
+                resolver.resolve(name, abi.encodeCall(IDataResolver.data, (n, key))), (bytes)
+            ).length,
+            0,
+            "no stealth record"
         );
         vm.expectRevert(
             abi.encodeWithSelector(

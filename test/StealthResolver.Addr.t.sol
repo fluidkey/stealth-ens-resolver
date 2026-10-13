@@ -4,6 +4,7 @@ pragma solidity 0.8.25;
 import {EIP3668} from "@ens/contracts/ccipRead/EIP3668.sol";
 import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol";
 import {IAddressResolver} from "@ens/contracts/resolvers/profiles/IAddressResolver.sol";
+import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol";
 import {IExtendedResolver} from "@ens/contracts/resolvers/profiles/IExtendedResolver.sol";
 
 import {StealthResolver} from "../src/StealthResolver.sol";
@@ -57,12 +58,12 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         assertEq(p.urls[0], STEALTH_GW);
         assertEq(p.callData, abi.encodeCall(IExtendedResolver.resolve, (dns("bob.fkey.eth"), data)));
         assertEq(p.callbackFunction, resolver.resolveStealthCallback.selector);
-        assertEq(p.extraData, abi.encode(bobNode, COIN_ETH, true));
+        assertEq(p.extraData, abi.encode(dns("bob.fkey.eth"), COIN_ETH, true));
     }
 
     function test_lookupShape_coinType() public view {
         EIP3668.Params memory p = _lookupCoin("bob.fkey.eth", COIN_BASE);
-        assertEq(p.extraData, abi.encode(bobNode, COIN_BASE, false));
+        assertEq(p.extraData, abi.encode(dns("bob.fkey.eth"), COIN_BASE, false));
     }
 
     function test_ownGatewayWinsOverInherited() public {
@@ -162,16 +163,69 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         assertEq(bytes4(v), MockVerifier.Rejected.selector);
     }
 
-    /// @dev A record for bob written in Fluidkey's (inherited) records resolver is ignored:
-    ///      verification only ever uses the name's own records resolver.
-    function test_inheritedRecordsResolverNeverVerifies() public {
+    // Inheritance (wildcard names).
+
+    function _setBobRecordInFluidkeyRecords() internal {
         string memory key = stealthKey(COIN_ETH);
         vm.prank(fluidkey);
         fkeyRecords.setData(bobNode, key, META);
+    }
+
+    /// @dev A record for bob in Fluidkey's records resolver, inherited from fkey.eth, is the
+    ///      record bob is verified against: a lying gateway cannot redirect bob's payments.
+    function test_inheritedRecord_verifies() public {
+        _setBobRecordInFluidkeyRecords();
+        (bool ok, bytes memory v) = callback(_lookup("bob.fkey.eth"), abi.encode(_derived(), VD));
+        assertTrue(ok, "honest gateway");
+        assertEq(_resolved(v), _derived());
+
+        address attacker = makeAddr("attacker");
+        (ok, v) = callback(_lookup("bob.fkey.eth"), abi.encode(attacker, VD));
+        assertFalse(ok, "lying gateway");
+        assertEq(
+            v,
+            abi.encodeWithSelector(
+                StealthResolver.StealthAddressMismatch.selector, attacker, _derived()
+            )
+        );
+    }
+
+    /// @dev The record served through `resolve(name, data(...))` is the record the callback
+    ///      verifies against, for every name: served means verified.
+    function test_servedRecordIsVerifiedRecord() public {
+        _setBobRecordInFluidkeyRecords();
+        bytes memory v = resolver.resolve(
+            dns("bob.fkey.eth"), abi.encodeCall(IDataResolver.data, (bobNode, stealthKey(COIN_ETH)))
+        );
+        assertEq(abi.decode(v, (bytes)), META, "served");
+        (bool ok,) = callback(_lookup("bob.fkey.eth"), abi.encode(makeAddr("attacker"), VD));
+        assertFalse(ok, "verified against it");
+    }
+
+    /// @dev A name's own records resolver replaces the inherited one as a whole: a record left in
+    ///      the parent's records resolver no longer applies.
+    function test_ownRecordsResolverReplacesInherited() public {
+        string memory key = stealthKey(COIN_ETH);
+        vm.prank(fluidkey);
+        fkeyRecords.setData(aliceNode, key, META);
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
         address any = makeAddr("any");
-        (bool ok, bytes memory v) = callback(_lookup("bob.fkey.eth"), abi.encode(any, VD));
+        (bool ok, bytes memory v) = callback(_lookup("alice.fkey.eth"), abi.encode(any, VD));
         assertTrue(ok);
-        assertEq(_resolved(v), any, "unverified");
+        assertEq(_resolved(v), any, "unverified: alice's own records resolver has no record");
+    }
+
+    /// @dev Two levels: sub.alice.fkey.eth takes alice's records resolver and fkey.eth's URLs.
+    function test_inheritedRecord_twoLevels() public {
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
+        bytes32 subNode = node("sub.alice.fkey.eth");
+        string memory key = stealthKey(COIN_ETH);
+        vm.prank(alice);
+        aliceRecords.setData(subNode, key, META);
+        EIP3668.Params memory p = _lookup("sub.alice.fkey.eth");
+        assertEq(p.urls[0], STEALTH_GW);
+        (bool ok,) = callback(p, abi.encode(makeAddr("attacker"), VD));
+        assertFalse(ok, "verified against alice's records resolver");
     }
 
     function test_recordsResolverWithoutDataProfile_isUnverified() public {
@@ -246,6 +300,17 @@ contract StealthResolverAddrTest is StealthResolverFixture {
             )
         );
         resolver.verifyStealthResolution(aliceNode, COIN_ETH, address(0xBAD), VD);
+    }
+
+    /// @dev A node cannot be walked to its ancestors: out-of-flow verification covers names with
+    ///      their own records resolver only, though the callback verifies inherited records.
+    function test_verifyStealthResolution_inheritedRecordNotFound() public {
+        _setBobRecordInFluidkeyRecords();
+        address derived = _derived(); // external call: before expectRevert
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, bobNode, COIN_ETH)
+        );
+        resolver.verifyStealthResolution(bobNode, COIN_ETH, derived, VD);
     }
 
     function test_verifyStealthResolution_missingRecordReverts() public {

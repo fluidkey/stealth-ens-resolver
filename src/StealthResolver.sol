@@ -36,14 +36,16 @@ import {IStealthVerifier} from "./interfaces/IStealthVerifier.sol";
 ///      `PublicResolverV2`, an offchain resolver, ...). Every query is forwarded to it through ENS's
 ///      `ResolverCaller`, as ENS's mirror resolvers do. Added on top, as the ENSIP requires:
 ///      address queries for names with gateway URLs resolve through ERC-3668 and are verified
-///      against the meta-address record served by the name's own records resolver.
+///      against the meta-address record.
 ///
 ///      Queried only through ENSIP-10 `resolve()`; no profile is answered directly.
 ///
 ///      Per query for a DNS-encoded name N (own config of N, else the nearest ancestor's, per field):
 ///      - Address record, effective gateway URLs non-empty: `OffchainLookup` to them; the callback
-///        verifies if N's own records resolver serves the ENSIP record for the coin type,
+///        verifies if the effective records resolver holds the ENSIP record for the coin type,
 ///        otherwise the verifier decides (unverified mode).
+///      - ENSIP-30 Section 1 record of this resolver's scheme: answered here from the same onchain
+///        read the callback verifies against, so the served record is the verified record.
 ///      - Anything else: forwarded to the effective records resolver.
 contract StealthResolver is
     ERC165,
@@ -215,14 +217,16 @@ contract StealthResolver is
     }
 
     /// @inheritdoc IStealthResolver
-    /// @dev ENSIP-30 Section 5. The record is read onchain from `node`'s own records resolver.
+    /// @dev ENSIP-30 Section 5. A node cannot be walked to its ancestors, so the record is read
+    ///      from `node`'s own records resolver only: names that inherit their records resolver
+    ///      (wildcard names) are verified in the callback but revert `NoStealthRecord` here.
     function verifyStealthResolution(
         bytes32 node,
         uint256 coinType,
         address stealthAddress,
         bytes calldata verificationData
     ) external view returns (address) {
-        bytes memory record = _stealthRecord(node, coinType);
+        bytes memory record = _readRecord(_configs[node].recordsResolver, node, coinType);
         if (record.length == 0) revert NoStealthRecord(node, coinType);
         return _verify(node, coinType, record, verificationData, stealthAddress);
     }
@@ -232,7 +236,7 @@ contract StealthResolver is
     ////////////////////////////////////////////////////////////////////////
 
     /// @notice Resolves `data` for the DNS-encoded `name`, including names absent from the registry.
-    /// @dev ENSIP-10; ENSIP-30 Section 4. `multicall(bytes[])` is answered as a batch.
+    /// @dev ENSIP-10; ENSIP-30 Sections 1 and 4. `multicall(bytes[])` is answered as a batch.
     function resolve(bytes calldata name, bytes calldata data)
         external
         view
@@ -252,20 +256,22 @@ contract StealthResolver is
     }
 
     /// @notice ERC-3668 callback for address records.
-    /// @dev ENSIP-30 Section 4, step 3: verified if `node`'s own records resolver serves the
-    ///      record for `coinType`, read onchain here; otherwise the verifier decides.
+    /// @dev ENSIP-30 Section 4, step 3: verified if the effective records resolver of `name`
+    ///      holds the record for `coinType`, read onchain here; otherwise the verifier decides.
     /// @param response `abi.encode(address stealthAddress, bytes verificationData)` from the gateway.
-    /// @param extraData `abi.encode(node, coinType, legacy)`; `legacy` = `addr(bytes32)` was queried.
+    /// @param extraData `abi.encode(name, coinType, legacy)`; `legacy` = `addr(bytes32)` was queried.
     /// @return The ABI-encoded result of the queried address profile.
     function resolveStealthCallback(bytes calldata response, bytes calldata extraData)
         external
         view
         returns (bytes memory)
     {
-        (bytes32 node, uint256 coinType, bool legacy) =
-            abi.decode(extraData, (bytes32, uint256, bool));
+        (bytes memory name, uint256 coinType, bool legacy) =
+            abi.decode(extraData, (bytes, uint256, bool));
         (address claimed, bytes memory verificationData) = abi.decode(response, (address, bytes));
-        bytes memory record = _stealthRecord(node, coinType);
+        bytes32 node = NameCoder.namehash(name, 0);
+        (address recordsResolver,) = _effectiveConfig(name);
+        bytes memory record = _readRecord(recordsResolver, node, coinType);
         address resolved = record.length == 0
             ? VERIFIER.verify(node, coinType, "", verificationData, claimed)
             : _verify(node, coinType, record, verificationData, claimed);
@@ -299,18 +305,24 @@ contract StealthResolver is
         if (selector == IStealthResolver.gatewayURLs.selector) {
             return abi.encode(urls);
         }
+        if (selector == IDataResolver.data.selector) {
+            (, string memory key) = abi.decode(data[4:], (bytes32, string));
+            (bool isStealthKey, uint256 coinType) = _parseStealthKey(key);
+            if (isStealthKey) {
+                return abi.encode(_readRecord(recordsResolver, _checkNode(name, data), coinType));
+            }
+        }
         bool legacy = selector == IAddrResolver.addr.selector;
         bool isAddr = legacy || selector == IAddressResolver.addr.selector;
         if (isAddr && urls.length > 0) {
-            bytes32 node = NameCoder.namehash(name, 0);
-            if (bytes32(data[4:36]) != node) revert NodeMismatch(bytes32(data[4:36]), node);
+            _checkNode(name, data);
             uint256 coinType = legacy ? COIN_TYPE_ETH : uint256(bytes32(data[36:68]));
             revert OffchainLookup(
                 address(this),
                 urls,
                 abi.encodeCall(IExtendedResolver.resolve, (name, data)),
                 this.resolveStealthCallback.selector,
-                abi.encode(node, coinType, legacy)
+                abi.encode(name, coinType, legacy)
             );
         }
         if (recordsResolver == address(0)) {
@@ -364,15 +376,22 @@ contract StealthResolver is
         }
     }
 
-    /// @dev The ENSIP-30 Section 1 record for `node`, from `node`'s own records resolver only.
-    ///      A records resolver without ENSIP-24 support has no record; one that claims support but
-    ///      reverts fails the resolution.
-    function _stealthRecord(bytes32 node, uint256 coinType)
+    /// @dev The namehash of `name`; reverts unless the profile calldata carries the same node.
+    function _checkNode(bytes calldata name, bytes calldata data) internal pure returns (bytes32) {
+        bytes32 node = NameCoder.namehash(name, 0);
+        if (bytes32(data[4:36]) != node) revert NodeMismatch(bytes32(data[4:36]), node);
+        return node;
+    }
+
+    /// @dev The ENSIP-30 Section 1 record value for `node` and `coinType` in `recordsResolver`,
+    ///      read directly with `data(node, key)`. The single read behind serving the record and
+    ///      verifying against it. A records resolver without ENSIP-24 support has no record; one
+    ///      that claims support but reverts fails the resolution.
+    function _readRecord(address recordsResolver, bytes32 node, uint256 coinType)
         internal
         view
-        returns (bytes memory record)
+        returns (bytes memory)
     {
-        address recordsResolver = _configs[node].recordsResolver;
         if (
             recordsResolver == address(0)
                 || !ERC165Checker.supportsInterface(recordsResolver, type(IDataResolver).interfaceId)
@@ -381,13 +400,12 @@ contract StealthResolver is
             abi.encodeCall(IDataResolver.data, (node, _stealthKey(coinType)))
         );
         if (!ok || v.length < 64) revert RecordUnavailable(node, coinType);
-        record = abi.decode(v, (bytes));
-        if (record.length == 0) return record;
-        // Flag byte plus a non-empty meta-address; reserved flag bits zero.
-        if (record.length < 2 || uint8(record[0]) & 0xfe != 0) revert MalformedRecord(record);
+        return abi.decode(v, (bytes));
     }
 
-    /// @dev Verified mode: the verifier rederives from the record; the result must equal `claimed`.
+    /// @dev Verified mode: the record must be well formed (ENSIP-30 Section 1: a flag byte with
+    ///      reserved bits zero, then a non-empty meta-address); the verifier rederives from it and
+    ///      the result must equal `claimed`.
     function _verify(
         bytes32 node,
         uint256 coinType,
@@ -395,6 +413,7 @@ contract StealthResolver is
         bytes memory verificationData,
         address claimed
     ) internal view returns (address) {
+        if (record.length < 2 || uint8(record[0]) & 0xfe != 0) revert MalformedRecord(record);
         address derived = VERIFIER.verify(
             node,
             coinType,
@@ -408,12 +427,32 @@ contract StealthResolver is
 
     /// @dev ENSIP-30 Section 1 key: decimal, no leading zeros, no `0x`.
     function _stealthKey(uint256 coinType) internal view returns (string memory) {
-        return string.concat(
-            "stealth-meta-address[",
-            Strings.toString(_SCHEME_ID),
-            "][",
-            Strings.toString(coinType),
-            "]"
-        );
+        return string.concat(_stealthKeyPrefix(), Strings.toString(coinType), "]");
+    }
+
+    /// @dev `stealth-meta-address[<schemeId>][`.
+    function _stealthKeyPrefix() internal view returns (string memory) {
+        return string.concat("stealth-meta-address[", Strings.toString(_SCHEME_ID), "][");
+    }
+
+    /// @dev Whether `key` is this scheme's ENSIP-30 Section 1 key in canonical form, and its coin
+    ///      type. Non-canonical spellings (`[060]`, `[0x3c]`) are not the record and are forwarded.
+    function _parseStealthKey(string memory key)
+        internal
+        view
+        returns (bool ok, uint256 coinType)
+    {
+        bytes memory k = bytes(key);
+        uint256 start = bytes(_stealthKeyPrefix()).length;
+        if (k.length <= start + 1 || k[k.length - 1] != "]") return (false, 0);
+        for (uint256 i = start; i < k.length - 1; ++i) {
+            uint8 digit;
+            unchecked {
+                digit = uint8(k[i]) - 48; // wraps above 9 for bytes below '0'
+            }
+            if (digit > 9 || coinType > (type(uint256).max - digit) / 10) return (false, 0);
+            coinType = coinType * 10 + digit;
+        }
+        ok = keccak256(k) == keccak256(bytes(_stealthKey(coinType)));
     }
 }
