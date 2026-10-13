@@ -106,6 +106,12 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         resolver.setConfig(dns("eth"), address(fkeyRecords), urls("https://eth.gw"));
     }
 
+    function test_setConfig_selfAsRecordsResolverReverts() public {
+        vm.prank(alice);
+        vm.expectRevert(StealthResolver.InvalidRecordsResolver.selector);
+        resolver.setConfig(dns("alice.fkey.eth"), address(resolver), new string[](0));
+    }
+
     function test_setConfig_expiredNameReverts() public {
         vm.warp(expiry);
         assertFalse(resolver.canSetConfig(dns("alice.fkey.eth"), alice));

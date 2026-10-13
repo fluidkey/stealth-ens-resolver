@@ -86,6 +86,9 @@ contract StealthResolver is
     /// @notice `account` may not set the config of `name`.
     error Unauthorized(bytes name, address account);
 
+    /// @notice A name's records resolver cannot be this resolver.
+    error InvalidRecordsResolver();
+
     /// @notice The node in the resolver calldata is not the namehash of the DNS-encoded name.
     error NodeMismatch(bytes32 node, bytes32 nameNode);
 
@@ -149,6 +152,7 @@ contract StealthResolver is
         external
     {
         if (!canSetConfig(name, msg.sender)) revert Unauthorized(name, msg.sender);
+        if (recordsResolver == address(this)) revert InvalidRecordsResolver();
         bytes32 node = NameCoder.namehash(name, 0);
         Config storage c = _configs[node];
         c.recordsResolver = recordsResolver;
