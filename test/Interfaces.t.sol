@@ -22,8 +22,7 @@ contract InterfacesTest is Test {
 
     function test_IStealthVerifier_interfaceIdFromSignatures() public pure {
         bytes4 id = bytes4(keccak256("schemeId()"))
-            ^ bytes4(keccak256("verify(bytes,bytes,address)"))
-            ^ bytes4(keccak256("validateMetaAddress(bytes)"));
+            ^ bytes4(keccak256("verify(bytes32,uint256,bytes,bytes,address)"));
         assertEq(type(IStealthVerifier).interfaceId, id);
     }
 }
