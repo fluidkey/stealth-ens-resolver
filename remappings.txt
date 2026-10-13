@@ -1,0 +1,8 @@
+@ensv2/=lib/namechain/contracts/src/
+@ens/contracts/=lib/namechain/contracts/lib/ens-contracts/contracts/
+@ensdomains/buffer/=lib/namechain/contracts/lib/buffer/
+@openzeppelin/contracts/=lib/namechain/contracts/lib/openzeppelin-contracts/contracts/
+forge-std/=lib/forge-std/src/
+lib/namechain/contracts/lib/ens-contracts/contracts/utils/LibMem/=lib/namechain/contracts/src/utils/
+lib/namechain/contracts/lib/ens-contracts/:@openzeppelin/contracts=lib/namechain/contracts/lib/openzeppelin-contracts-v4/contracts
+lib/namechain/contracts/lib/ens-contracts/:@openzeppelin/contracts-v5=lib/namechain/contracts/lib/openzeppelin-contracts/contracts

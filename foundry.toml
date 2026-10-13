@@ -1,0 +1,24 @@
+# Compiler settings match the ENSv2 canonical contracts
+# (ensdomains/namechain@48b3e2d, contracts/hardhat.config.ts): solc 0.8.25, cancun, 1000 runs.
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+test = "test"
+script = "script"
+solc_version = "0.8.25"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 1000
+bytecode_hash = "none"
+cbor_metadata = false
+ignored_warnings_from = ["lib/"]
+fs_permissions = []
+
+[profile.ci]
+fuzz = { runs = 1000 }
+verbosity = 3
+
+[fmt]
+line_length = 100
+sort_imports = true
