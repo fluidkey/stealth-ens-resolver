@@ -25,7 +25,11 @@ import {TEST_META} from "../utils/Constants.sol";
 ///      StealthResolver deployed through the deploy script, a fresh name registered in the live
 ///      ETHRegistry, records in a PermissionedResolver deployed from ENS's implementation, and
 ///      resolution through the live UniversalResolverV2. Runs when SEPOLIA_RPC_URL is set.
+///      Pinned to a block where LABEL is available, so the test cannot break when the label is
+///      registered later; the RPC must serve historical state (archive).
 contract SepoliaENSv2ForkTest is CCIPClient {
+    uint256 internal constant FORK_BLOCK = 11_906_000; // 2026-10-13, LABEL available
+
     IRegistry internal constant ROOT_REGISTRY =
         IRegistry(0x11b5BfbE9078D826b1eDBDd1cFC12f5828D9F50C);
     IPermissionedRegistry internal constant ETH_REGISTRY =
@@ -56,7 +60,7 @@ contract SepoliaENSv2ForkTest is CCIPClient {
             vm.skip(true);
             return;
         }
-        vm.createSelectFork(rpc);
+        vm.createSelectFork(rpc, FORK_BLOCK);
 
         verifier = new MockVerifier();
         vm.setEnv("ROOT_REGISTRY", vm.toString(address(ROOT_REGISTRY)));
