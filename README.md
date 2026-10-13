@@ -25,7 +25,12 @@ git clone --recurse-submodules <repo>
 forge build
 forge test
 ./script/verify-canonical-build.sh
+./script/check-ensip-sync.sh
 ```
+
+`check-ensip-sync.sh` checks that `src/interfaces/IStealthResolver.sol` contains the ENSIP's
+Section 5 interface verbatim, against the pinned ENSIP commit (override with `ENSIP_REF`, or point
+`ENSIP_FILE` at a local draft). Both scripts run in CI.
 
 ## Dependencies
 

@@ -33,3 +33,6 @@ jobs:
 
       - name: Canonical build check
         run: ./script/verify-canonical-build.sh
+
+      - name: ENSIP interface sync
+        run: ./script/check-ensip-sync.sh
