@@ -48,7 +48,7 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         );
         vm.prank(alice);
         resolver.setConfig(dns("alice.fkey.eth"), address(aliceRecords), gw);
-        (address records, string[] memory own) = resolver.config(aliceNode);
+        (address records, string[] memory own) = resolver.config(dns("alice.fkey.eth"));
         assertEq(records, address(aliceRecords));
         assertEq(own[0], "https://alice.gw");
         assertEq(resolver.gatewayURLs(aliceNode)[0], "https://alice.gw");
@@ -124,9 +124,9 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         assertEq(abi.decode(v, (string[]))[0], STEALTH_GW);
     }
 
-    /// @dev Config is keyed by node and outlives a registration: after expiry and registration to
-    ///      someone else, the previous holder's config applies until the new holder replaces it.
-    function test_setConfig_survivesReregistration() public {
+    /// @dev Config belongs to a registration: once the name expires and is registered to someone
+    ///      else, the previous holder's config is not read.
+    function test_setConfig_droppedOnReregistration() public {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "https://alice.gw");
         ethRegistry.grantRootRoles(RegistryRolesLib.ROLE_RENEW, address(this));
         ethRegistry.renew(uint256(keccak256("fkey")), expiry + 1000 days);
@@ -143,11 +143,48 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         );
         assertFalse(resolver.canSetConfig(dns("alice.fkey.eth"), alice), "old holder");
         (address r,) = resolver.getResolver(dns("alice.fkey.eth"));
-        assertEq(r, address(aliceRecords), "previous holder's config still applies");
+        assertEq(r, address(fkeyRecords), "previous holder's config not read");
+        (address own,) = resolver.config(dns("alice.fkey.eth"));
+        assertEq(own, address(0));
+    }
 
-        setConfig(carol, "alice.fkey.eth", address(0), "");
-        (r,) = resolver.getResolver(dns("alice.fkey.eth"));
-        assertEq(r, address(fkeyRecords), "new holder replaced it");
+    // Who may write the stealth record.
+
+    function test_setStealthRecord_authority() public {
+        assertTrue(resolver.canSetStealthRecord(dns("alice.fkey.eth"), alice), "own name");
+        assertFalse(resolver.canSetStealthRecord(dns("alice.fkey.eth"), fluidkey), "parent");
+        assertTrue(resolver.canSetStealthRecord(dns("bob.fkey.eth"), fluidkey), "wildcard");
+        assertFalse(resolver.canSetStealthRecord(dns("bob.fkey.eth"), alice), "sibling");
+        assertTrue(resolver.canSetStealthRecord(dns("x.alice.fkey.eth"), alice), "below own");
+        assertFalse(resolver.canSetStealthRecord(dns("eth"), address(this)), "top-level");
+        assertFalse(resolver.canSetStealthRecord(dns("x.eth"), address(this)), "unregistered 2LD");
+        assertFalse(resolver.canSetStealthRecord(dns(""), address(this)), "root");
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                StealthResolver.Unauthorized.selector, dns("bob.fkey.eth"), stranger
+            )
+        );
+        resolver.setStealthRecord(dns("bob.fkey.eth"), 60, hex"0102");
+    }
+
+    function test_setStealthRecord_byDelegatedSetResolverRole() public {
+        address delegate = makeAddr("delegate");
+        uint256 tokenId = fkeyRegistry.getTokenId(uint256(keccak256("alice")));
+        vm.prank(alice);
+        fkeyRegistry.grantRoles(tokenId, RegistryRolesLib.ROLE_SET_RESOLVER, delegate);
+        setRecord(delegate, "alice.fkey.eth", COIN_ETH, META);
+    }
+
+    function test_setStealthRecord_emitsAndClears() public {
+        vm.expectEmit(address(resolver));
+        emit StealthResolver.StealthRecordChanged(aliceNode, dns("alice.fkey.eth"), COIN_ETH, META);
+        setRecord(alice, "alice.fkey.eth", COIN_ETH, META);
+        setRecord(alice, "alice.fkey.eth", COIN_ETH, "");
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, aliceNode, COIN_ETH)
+        );
+        resolver.verifyStealthResolution(aliceNode, COIN_ETH, address(1), "");
     }
 
     function test_setConfig_expiredNameReverts() public {

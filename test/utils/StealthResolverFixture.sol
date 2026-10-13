@@ -126,12 +126,17 @@ abstract contract StealthResolverFixture is V1Fixture, V2Fixture, CCIPClient {
         );
     }
 
-    /// @dev Alice's record, written to her own records resolver, and her config pointing at it.
+    function setRecord(address caller, string memory name, uint256 coinType, bytes memory value)
+        internal
+    {
+        vm.prank(caller);
+        resolver.setStealthRecord(dns(name), coinType, value);
+    }
+
+    /// @dev Alice's config pointing at her own records resolver, and her stealth record.
     function setUpAliceVerified(uint256 coinType) internal {
-        string memory key = stealthKey(coinType); // external call: build before vm.prank
-        vm.prank(alice);
-        aliceRecords.setData(aliceNode, key, META);
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
+        setRecord(alice, "alice.fkey.eth", coinType, META);
     }
 
     function metaWithoutFlag() internal pure returns (bytes memory) {

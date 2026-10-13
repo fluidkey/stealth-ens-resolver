@@ -6,9 +6,10 @@ import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol
 import {IAddressResolver} from "@ens/contracts/resolvers/profiles/IAddressResolver.sol";
 import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol";
 import {IExtendedResolver} from "@ens/contracts/resolvers/profiles/IExtendedResolver.sol";
+import {IRegistry} from "~src/registry/interfaces/IRegistry.sol";
+import {RegistryRolesLib} from "~src/registry/libraries/RegistryRolesLib.sol";
 
 import {StealthResolver} from "../src/StealthResolver.sol";
-import {MockBrokenDataResolver} from "./mocks/MockBrokenDataResolver.sol";
 import {MockOffchainRecords} from "./mocks/MockOffchainRecords.sol";
 import {MockVerifier} from "./mocks/MockVerifier.sol";
 import {StealthResolverFixture} from "./utils/StealthResolverFixture.sol";
@@ -78,7 +79,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         resolver.resolve(dns("bob.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode)));
     }
 
-    // Verified (record in the name's own records resolver).
+    // Verified (the name's own record).
 
     function test_verified_honestGateway() public {
         setUpAliceVerified(COIN_ETH);
@@ -139,9 +140,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
     function test_verified_recordRemovedBetweenLookupAndCallback() public {
         setUpAliceVerified(COIN_ETH);
         EIP3668.Params memory p = _lookup("alice.fkey.eth");
-        string memory key = stealthKey(COIN_ETH);
-        vm.prank(alice);
-        aliceRecords.setData(aliceNode, key, "");
+        setRecord(alice, "alice.fkey.eth", COIN_ETH, "");
         (bool ok,) = callback(p, abi.encode(makeAddr("any"), VD));
         assertTrue(ok, "record read at callback time");
     }
@@ -163,18 +162,16 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         assertEq(bytes4(v), MockVerifier.Rejected.selector);
     }
 
-    // Inheritance (wildcard names).
+    // Wildcard names: the record is written by the nearest registered ancestor.
 
-    function _setBobRecordInFluidkeyRecords() internal {
-        string memory key = stealthKey(COIN_ETH);
-        vm.prank(fluidkey);
-        fkeyRecords.setData(bobNode, key, META);
+    function _setBobRecord() internal {
+        setRecord(fluidkey, "bob.fkey.eth", COIN_ETH, META);
     }
 
-    /// @dev A record for bob in Fluidkey's records resolver, inherited from fkey.eth, is the
-    ///      record bob is verified against: a lying gateway cannot redirect bob's payments.
-    function test_inheritedRecord_verifies() public {
-        _setBobRecordInFluidkeyRecords();
+    /// @dev Fluidkey writes the record of bob, a username that exists only in its gateway: a
+    ///      lying gateway cannot redirect bob's payments.
+    function test_wildcardRecord_verifies() public {
+        _setBobRecord();
         (bool ok, bytes memory v) = callback(_lookup("bob.fkey.eth"), abi.encode(_derived(), VD));
         assertTrue(ok, "honest gateway");
         assertEq(_resolved(v), _derived());
@@ -193,7 +190,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
     /// @dev The record served through `resolve(name, data(...))` is the record the callback
     ///      verifies against, for every name: served means verified.
     function test_servedRecordIsVerifiedRecord() public {
-        _setBobRecordInFluidkeyRecords();
+        _setBobRecord();
         bytes memory v = resolver.resolve(
             dns("bob.fkey.eth"), abi.encodeCall(IDataResolver.data, (bobNode, stealthKey(COIN_ETH)))
         );
@@ -202,82 +199,80 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         assertFalse(ok, "verified against it");
     }
 
-    /// @dev A name's own records resolver replaces the inherited one as a whole: a record left in
-    ///      the parent's records resolver no longer applies.
-    function test_ownRecordsResolverReplacesInherited() public {
-        string memory key = stealthKey(COIN_ETH);
+    /// @dev Registration takes authority: a record Fluidkey wrote for a username before it was
+    ///      registered is not read once it is, and Fluidkey cannot write it afterwards.
+    function test_registrationTakesAuthority() public {
+        setRecord(fluidkey, "carol.fkey.eth", COIN_ETH, META);
+        address carol = makeAddr("carol");
         vm.prank(fluidkey);
-        fkeyRecords.setData(aliceNode, key, META);
-        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
+        fkeyRegistry.register(
+            "carol",
+            carol,
+            IRegistry(address(0)),
+            address(resolver),
+            RegistryRolesLib.ROLE_SET_RESOLVER,
+            expiry
+        );
         address any = makeAddr("any");
-        (bool ok, bytes memory v) = callback(_lookup("alice.fkey.eth"), abi.encode(any, VD));
+        (bool ok, bytes memory v) = callback(_lookup("carol.fkey.eth"), abi.encode(any, VD));
         assertTrue(ok);
-        assertEq(_resolved(v), any, "unverified: alice's own records resolver has no record");
+        assertEq(_resolved(v), any, "unverified: carol has no record of her own");
+
+        vm.prank(fluidkey);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                StealthResolver.Unauthorized.selector, dns("carol.fkey.eth"), fluidkey
+            )
+        );
+        resolver.setStealthRecord(dns("carol.fkey.eth"), COIN_ETH, META);
     }
 
-    /// @dev Two levels: sub.alice.fkey.eth takes alice's records resolver and fkey.eth's URLs.
-    function test_inheritedRecord_twoLevels() public {
-        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
-        bytes32 subNode = node("sub.alice.fkey.eth");
-        string memory key = stealthKey(COIN_ETH);
-        vm.prank(alice);
-        aliceRecords.setData(subNode, key, META);
+    /// @dev Two levels: sub.alice.fkey.eth is written by alice and takes fkey.eth's URLs.
+    function test_wildcardRecord_twoLevels() public {
+        setRecord(alice, "sub.alice.fkey.eth", COIN_ETH, META);
         EIP3668.Params memory p = _lookup("sub.alice.fkey.eth");
         assertEq(p.urls[0], STEALTH_GW);
         (bool ok,) = callback(p, abi.encode(makeAddr("attacker"), VD));
-        assertFalse(ok, "verified against alice's records resolver");
+        assertFalse(ok, "verified against the record alice wrote");
     }
 
-    function test_recordsResolverWithoutDataProfile_isUnverified() public {
+    /// @dev The record does not depend on the records resolver: an offchain one serves the other
+    ///      records while the stealth record verifies.
+    function test_offchainRecordsResolver_verifies() public {
         MockOffchainRecords offchain = new MockOffchainRecords();
-        setConfig(alice, "alice.fkey.eth", address(offchain), "");
-        address any = makeAddr("any");
-        (bool ok, bytes memory v) = callback(_lookup("alice.fkey.eth"), abi.encode(any, VD));
+        vm.prank(fluidkey);
+        resolver.setConfig(dns("fkey.eth"), address(offchain), urls(STEALTH_GW));
+        _setBobRecord();
+        (bool ok,) = callback(_lookup("bob.fkey.eth"), abi.encode(makeAddr("attacker"), VD));
+        assertFalse(ok, "verified");
+        (ok,) = callback(_lookup("bob.fkey.eth"), abi.encode(_derived(), VD));
         assertTrue(ok);
-        assertEq(_resolved(v), any);
     }
 
-    function test_recordsResolverClaimingDataButReverting_failsClosed() public {
-        MockBrokenDataResolver broken = new MockBrokenDataResolver();
-        setConfig(alice, "alice.fkey.eth", address(broken), "");
-        (bool ok, bytes memory v) =
-            callback(_lookup("alice.fkey.eth"), abi.encode(makeAddr("any"), VD));
-        assertFalse(ok);
-        assertEq(
-            v,
-            abi.encodeWithSelector(StealthResolver.RecordUnavailable.selector, aliceNode, COIN_ETH)
-        );
-    }
+    // Malformed records (ENSIP-30 Section 1), refused when written.
 
-    // Malformed records (ENSIP-30 Section 1).
-
-    function _setAliceRecord(bytes memory value) internal {
-        string memory key = stealthKey(COIN_ETH);
+    function _expectMalformed(bytes memory value) internal {
         vm.prank(alice);
-        aliceRecords.setData(aliceNode, key, value);
-        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
+        vm.expectRevert(abi.encodeWithSelector(StealthResolver.MalformedRecord.selector, value));
+        resolver.setStealthRecord(dns("alice.fkey.eth"), COIN_ETH, value);
     }
 
     /// @dev Without this check the verifier would get an empty meta-address, i.e. unverified mode.
-    function test_flagOnlyRecordReverts() public {
-        _setAliceRecord(hex"01");
-        (bool ok, bytes memory v) =
-            callback(_lookup("alice.fkey.eth"), abi.encode(makeAddr("any"), VD));
-        assertFalse(ok);
-        assertEq(v, abi.encodeWithSelector(StealthResolver.MalformedRecord.selector, hex"01"));
+    function test_flagOnlyRecordRefused() public {
+        _expectMalformed(hex"01");
     }
 
-    function test_reservedFlagBitsRevert() public {
+    function test_reservedFlagBitsRefused() public {
         bytes memory value = META;
         value[0] = 0x03;
-        _setAliceRecord(value);
-        (bool ok, bytes memory v) = callback(_lookup("alice.fkey.eth"), abi.encode(_derived(), VD));
-        assertFalse(ok);
-        assertEq(bytes4(v), StealthResolver.MalformedRecord.selector);
+        _expectMalformed(value);
+        value[0] = 0x80;
+        _expectMalformed(value);
     }
 
+    /// @dev Scheme-specific shape is the verifier's to check, when verifying (fail closed).
     function test_badLengthRejectedByVerifier() public {
-        _setAliceRecord(hex"01aabb");
+        setRecord(alice, "alice.fkey.eth", COIN_ETH, hex"01aabb");
         (bool ok, bytes memory v) =
             callback(_lookup("alice.fkey.eth"), abi.encode(makeAddr("any"), VD));
         assertFalse(ok);
@@ -302,15 +297,10 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         resolver.verifyStealthResolution(aliceNode, COIN_ETH, address(0xBAD), VD);
     }
 
-    /// @dev A node cannot be walked to its ancestors: out-of-flow verification covers names with
-    ///      their own records resolver only, though the callback verifies inherited records.
-    function test_verifyStealthResolution_inheritedRecordNotFound() public {
-        _setBobRecordInFluidkeyRecords();
-        address derived = _derived(); // external call: before expectRevert
-        vm.expectRevert(
-            abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, bobNode, COIN_ETH)
-        );
-        resolver.verifyStealthResolution(bobNode, COIN_ETH, derived, VD);
+    /// @dev Out-of-flow verification covers wildcard names too.
+    function test_verifyStealthResolution_wildcardName() public {
+        _setBobRecord();
+        assertEq(resolver.verifyStealthResolution(bobNode, COIN_ETH, _derived(), VD), _derived());
     }
 
     function test_verifyStealthResolution_missingRecordReverts() public {

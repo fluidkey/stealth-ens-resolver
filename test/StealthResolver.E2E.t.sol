@@ -97,8 +97,7 @@ contract StealthResolverE2ETest is StealthResolverFixture {
     ///      Fluidkey published for it onchain; the record reads the same through the UR.
     function test_ur_wildcardUsername_verified() public {
         string memory key = stealthKey(COIN_ETH);
-        vm.prank(fluidkey);
-        fkeyRecords.setData(bobNode, key, META);
+        setRecord(fluidkey, "bob.fkey.eth", COIN_ETH, META);
 
         (bool ok, bytes memory result) =
             _ur("bob.fkey.eth", abi.encodeCall(IDataResolver.data, (bobNode, key)));
@@ -141,6 +140,30 @@ contract StealthResolverE2ETest is StealthResolverFixture {
             _ur("bob.fkey.eth", abi.encodeCall(ITextResolver.text, (bobNode, "avatar")));
         assertTrue(ok);
         assertEq(abi.decode(result, (string)), "ipfs://from-gateway");
+    }
+
+    /// @dev Fluidkey's setup: profile records from an offchain records resolver, usernames
+    ///      verified against records stored in StealthResolver.
+    function test_ur_offchainRecords_verifiedUsername() public {
+        MockOffchainRecords offchain = new MockOffchainRecords();
+        vm.prank(fluidkey);
+        resolver.setConfig(dns("fkey.eth"), address(offchain), urls(STEALTH_GW));
+        setRecord(fluidkey, "bob.fkey.eth", COIN_ETH, META);
+
+        recordsAnswer = abi.encode("ipfs://from-gateway");
+        (bool ok, bytes memory result) =
+            _ur("bob.fkey.eth", abi.encodeCall(ITextResolver.text, (bobNode, "avatar")));
+        assertTrue(ok);
+        assertEq(abi.decode(result, (string)), "ipfs://from-gateway");
+
+        bytes memory data = abi.encodeCall(IAddrResolver.addr, (bobNode));
+        gwClaimed = verifier.derive(metaWithoutFlag(), VD);
+        gwVerificationData = VD;
+        (ok,) = _ur("bob.fkey.eth", data);
+        assertTrue(ok, "honest gateway");
+        gwClaimed = makeAddr("attacker");
+        (ok,) = _ur("bob.fkey.eth", data);
+        assertFalse(ok, "lying gateway does not resolve");
     }
 
     function test_ur_multicall() public {

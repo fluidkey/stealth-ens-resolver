@@ -20,7 +20,7 @@ import {StealthResolverFixture} from "./utils/StealthResolverFixture.sol";
 
 /// @dev Everything that is not a stealth address or the stealth record is forwarded, unchanged,
 ///      to the effective records resolver: an unmodified PermissionedResolver, PublicResolverV2 or
-///      offchain resolver. The stealth record is answered from the onchain read verification uses.
+///      offchain resolver. The stealth record is answered from StealthResolver's own storage.
 contract StealthResolverForwardTest is StealthResolverFixture {
     function _data(string memory name, string memory key) internal view returns (bytes memory) {
         bytes memory v =
@@ -63,14 +63,14 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         assertEq(_data("alice.fkey.eth", stealthKey(COIN_BASE)).length, 0, "other coin type");
     }
 
-    /// @dev A records resolver that answers offchain cannot serve the stealth record: it would come
-    ///      from its gateway and could not be verified onchain (ENSIP-30 Section 1, Storage). The
-    ///      record reads as absent, without a lookup; other data keys still go offchain.
-    function test_offchainRecordsResolver_noStealthRecord() public {
+    /// @dev With a records resolver that answers offchain, the stealth record is still served
+    ///      from storage, without a lookup; other data keys go offchain.
+    function test_offchainRecordsResolver_stealthRecordFromStorage() public {
         MockOffchainRecords offchain = new MockOffchainRecords();
         vm.prank(fluidkey);
         resolver.setConfig(dns("fkey.eth"), address(offchain), urls(STEALTH_GW));
-        assertEq(_data("bob.fkey.eth", stealthKey(COIN_ETH)).length, 0);
+        setRecord(fluidkey, "bob.fkey.eth", COIN_ETH, META);
+        assertEq(_data("bob.fkey.eth", stealthKey(COIN_ETH)), META);
         expectLookup(
             address(resolver),
             abi.encodeCall(
@@ -102,10 +102,12 @@ contract StealthResolverForwardTest is StealthResolverFixture {
             assertEq(_data("alice.fkey.eth", others[i]), abi.encode(i), others[i]);
         }
 
-        string memory maxKey = stealthKey(type(uint256).max);
-        vm.prank(alice);
-        aliceRecords.setData(aliceNode, maxKey, META);
-        assertEq(_data("alice.fkey.eth", maxKey), META, "largest coin type is the record");
+        setRecord(alice, "alice.fkey.eth", type(uint256).max, META);
+        assertEq(
+            _data("alice.fkey.eth", stealthKey(type(uint256).max)),
+            META,
+            "largest coin type is the record"
+        );
     }
 
     function test_stealthRecord_nodeMustMatchName() public {
@@ -116,18 +118,14 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         resolver.resolve(dns("bob.fkey.eth"), abi.encodeCall(IDataResolver.data, (aliceNode, key)));
     }
 
-    /// @dev PermissionedResolver aliases apply to forwarded records but not to the stealth record,
-    ///      which is read under the name's own node for serving and verifying alike.
-    function test_alias_notAppliedToStealthRecord() public {
+    /// @dev The stealth key written into the records resolver with standard tooling is not the
+    ///      record: StealthResolver serves and verifies its own.
+    function test_stealthKeyInRecordsResolverIgnored() public {
         string memory key = stealthKey(COIN_ETH);
-        vm.startPrank(alice);
-        aliceRecords.setAlias(dns("alice.fkey.eth"), dns("alias.eth"));
-        aliceRecords.setData(node("alias.eth"), key, META);
-        aliceRecords.setText(node("alias.eth"), "url", "https://alias.example");
-        vm.stopPrank();
+        vm.prank(alice);
+        aliceRecords.setData(aliceNode, key, META);
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
-        assertEq(_text("alice.fkey.eth", "url"), "https://alias.example", "alias applies");
-        assertEq(_data("alice.fkey.eth", key).length, 0, "not to the stealth record");
+        assertEq(_data("alice.fkey.eth", key).length, 0);
     }
 
     function test_addressWithoutGatewayForwarded() public {

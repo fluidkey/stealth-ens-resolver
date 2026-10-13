@@ -24,28 +24,33 @@ import {LibRegistry} from "@ensv2/universalResolver/libraries/LibRegistry.sol";
 
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {ERC165} from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
-import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
 import {IStealthResolver} from "./interfaces/IStealthResolver.sol";
 import {IStealthVerifier} from "./interfaces/IStealthVerifier.sol";
 
 /// @title StealthResolver
 /// @notice ENSIP-30 (Stealth Address Resolution) verifying resolver for the ENSv2 registry.
-/// @dev Stores no records. Each name's config points at a records resolver, an unmodified ENS
-///      resolver chosen by whoever may set the name's resolver (its own `PermissionedResolver`,
-///      `PublicResolverV2`, an offchain resolver, ...). Every query is forwarded to it through ENS's
-///      `ResolverCaller`, as ENS's mirror resolvers do. Added on top, as the ENSIP requires:
-///      address queries for names with gateway URLs resolve through ERC-3668 and are verified
-///      against the meta-address record.
+/// @dev Stores the ENSIP-30 Section 1 stealth meta-address record and, per registered name, a
+///      config: a records resolver (an unmodified ENS resolver chosen by the name's owner, such as
+///      its own `PermissionedResolver`, `PublicResolverV2` or an offchain resolver) and gateway
+///      URLs. Every other record is forwarded to the records resolver through ENS's
+///      `ResolverCaller`, as ENS's mirror resolvers do.
 ///
 ///      Queried only through ENSIP-10 `resolve()`; no profile is answered directly.
 ///
-///      Per query for a DNS-encoded name N (own config of N, else the nearest ancestor's, per field):
+///      Authority. All state is written under the ENSv2 rule for setting a name's resolver
+///      (`ROLE_SET_RESOLVER` on the name's token, not expired), applied to the nearest registered
+///      name at or above the name written: a registered name writes its own state, an
+///      unregistered (wildcard) name's record is written by its nearest registered ancestor. State
+///      is keyed by that authority's registry resource, which ENSv2 renews when an expired name is
+///      registered again, so a previous holder's state is never read.
+///
+///      Per query for a DNS-encoded name N (config fields: N's own, else the nearest ancestor's):
 ///      - Address record, effective gateway URLs non-empty: `OffchainLookup` to them; the callback
-///        verifies if the effective records resolver holds the ENSIP record for the coin type,
-///        otherwise the verifier decides (unverified mode).
-///      - ENSIP-30 Section 1 record of this resolver's scheme: answered here from the same onchain
-///        read the callback verifies against, so the served record is the verified record.
+///        verifies if the stealth record for the coin type is stored, otherwise the verifier
+///        decides (unverified mode).
+///      - ENSIP-30 Section 1 record of this resolver's scheme: answered from storage, the same
+///        value the callback verifies against.
 ///      - Anything else: forwarded to the effective records resolver.
 contract StealthResolver is
     ERC165,
@@ -58,13 +63,29 @@ contract StealthResolver is
     // Types, immutables, storage
     ////////////////////////////////////////////////////////////////////////
 
-    /// @dev Per-name configuration.
+    /// @dev Configuration of a registered name.
     struct Config {
         address recordsResolver;
         string[] gatewayURLs;
     }
 
-    /// @notice The ENSv2 root registry, used to find who may set a name's resolver.
+    /// @dev What the registry says about a name (`_context`).
+    struct NameState {
+        /// @dev Storage key of the authority, `keccak256(registry, resource)`; zero if none.
+        bytes32 key;
+        /// @dev The registry holding the authority's token.
+        IPermissionedRegistry registry;
+        /// @dev The authority's EAC resource in `registry`.
+        uint256 resource;
+        /// @dev The authority is the name itself (the name is registered).
+        bool exact;
+        /// @dev Effective records resolver (only if requested).
+        address recordsResolver;
+        /// @dev Effective gateway URLs (only if requested).
+        string[] urls;
+    }
+
+    /// @notice The ENSv2 root registry, used to find who may write a name's state.
     IRegistry public immutable ROOT_REGISTRY;
 
     /// @notice Verifier for this resolver's single scheme (ENSIP-30 Section 5).
@@ -76,7 +97,18 @@ contract StealthResolver is
     /// @dev The verifier's scheme ID, read once at deployment: one scheme per resolver, for good.
     uint256 private immutable _SCHEME_ID;
 
-    mapping(bytes32 node => Config) private _configs;
+    /// @dev Config of a registered name, by its authority key.
+    mapping(bytes32 key => Config) private _configs;
+
+    /// @dev Stealth meta-address records, by the authority key of the nearest registered name at
+    ///      or above `node`.
+    mapping(bytes32 key => mapping(bytes32 node => mapping(uint256 coinType => bytes))) private
+        _records;
+
+    /// @dev Authority key of the last `setConfig` / `setStealthRecord` for `node`, for the
+    ///      node-based ENSIP-30 Section 5 functions only.
+    mapping(bytes32 node => bytes32 key) private _configKeys;
+    mapping(bytes32 node => bytes32 key) private _recordKeys;
 
     ////////////////////////////////////////////////////////////////////////
     // Events and errors
@@ -85,7 +117,12 @@ contract StealthResolver is
     /// @notice The config of `node` changed.
     event ConfigChanged(bytes32 indexed node, bytes name, address recordsResolver, string[] urls);
 
-    /// @notice `account` may not set the config of `name`.
+    /// @notice The ENSIP-30 Section 1 record of `node` for `coinType` changed.
+    event StealthRecordChanged(
+        bytes32 indexed node, bytes name, uint256 indexed coinType, bytes value
+    );
+
+    /// @notice `account` may not write this state of `name`.
     error Unauthorized(bytes name, address account);
 
     /// @notice A name's records resolver cannot be this resolver.
@@ -99,9 +136,6 @@ contract StealthResolver is
 
     /// @notice No stealth meta-address record for `node` and `coinType`.
     error NoStealthRecord(bytes32 node, uint256 coinType);
-
-    /// @notice The records resolver claims ENSIP-24 support but did not answer `data()`.
-    error RecordUnavailable(bytes32 node, uint256 coinType);
 
     /// @notice The stealth meta-address record is malformed (ENSIP-30 Section 1).
     error MalformedRecord(bytes record);
@@ -139,63 +173,87 @@ contract StealthResolver is
     }
 
     ////////////////////////////////////////////////////////////////////////
-    // Config
+    // Writes
     ////////////////////////////////////////////////////////////////////////
 
-    /// @notice Sets the records resolver and gateway URLs of `name`.
+    /// @notice Sets the records resolver and gateway URLs of the registered name `name`.
     /// @dev ENSIP-30 Section 5: gateway URLs are stored per name; the setter is
     ///      implementation-defined. Allowed for whoever may set `name`'s resolver in the ENSv2
-    ///      registry (see `canSetConfig`). Empty `urls` / zero `recordsResolver` inherit
-    ///      the nearest ancestor's on the `resolve()` path.
-    ///
-    ///      Config is keyed by node and outlives a registration: when a name expires and is
-    ///      registered again, the previous holder's config applies until the new holder calls
-    ///      this. Call it before pointing a name at this resolver.
+    ///      registry (see `canSetConfig`). Empty `urls` / zero `recordsResolver` inherit the
+    ///      nearest ancestor's on the `resolve()` path.
     /// @param name The DNS-encoded name.
-    /// @param recordsResolver The resolver holding the name's records.
+    /// @param recordsResolver The resolver holding the name's other records.
     /// @param urls ERC-3668 gateway URLs for stealth address resolution.
     function setConfig(bytes calldata name, address recordsResolver, string[] memory urls)
         external
     {
-        if (!canSetConfig(name, msg.sender)) revert Unauthorized(name, msg.sender);
+        NameState memory ctx = _context(name, false);
+        if (!ctx.exact || !_isAuthority(ctx, msg.sender)) revert Unauthorized(name, msg.sender);
         if (recordsResolver == address(this)) revert InvalidRecordsResolver();
         bytes32 node = NameCoder.namehash(name, 0);
-        Config storage c = _configs[node];
+        Config storage c = _configs[ctx.key];
         c.recordsResolver = recordsResolver;
         c.gatewayURLs = urls;
+        _configKeys[node] = ctx.key;
         emit ConfigChanged(node, name, recordsResolver, urls);
     }
 
-    /// @notice Whether `account` may set the config of `name`: the same rule as
-    ///         `PermissionedRegistry.setResolver`, i.e. `ROLE_SET_RESOLVER` on the name's token in
-    ///         its parent registry (resource or registry-wide), name not expired. Top-level
-    ///         names are excluded: their config would reach every name below them.
+    /// @notice Sets the ENSIP-30 Section 1 stealth meta-address record of `name` for `coinType`.
+    /// @dev ENSIP-30 Section 1. Allowed for whoever may set the resolver of the nearest registered
+    ///      name at or above `name` (see `canSetStealthRecord`): the name itself if registered,
+    ///      otherwise its nearest registered ancestor (wildcard names). A record written by an
+    ///      ancestor is no longer read once the name is registered.
     /// @param name The DNS-encoded name.
-    /// @param account The account to check.
-    function canSetConfig(bytes memory name, address account) public view returns (bool) {
-        IRegistry parent = LibRegistry.findParentRegistry(ROOT_REGISTRY, name, 0);
-        if (
-            address(parent) == address(0) || parent == ROOT_REGISTRY
-                || !ERC165Checker.supportsInterface(
-                    address(parent), type(IPermissionedRegistry).interfaceId
-                )
-        ) return false;
-        (bytes32 labelHash,) = NameCoder.readLabel(name, 0);
-        IPermissionedRegistry.State memory state =
-            IPermissionedRegistry(address(parent)).getState(uint256(labelHash));
-        if (block.timestamp >= state.expiry) return false;
-        return IPermissionedRegistry(address(parent)).hasRoles(
-            state.resource, RegistryRolesLib.ROLE_SET_RESOLVER, account
-        );
+    /// @param coinType The ENSIP-9 coin type.
+    /// @param value Flag byte (reserved bits zero) and the scheme's meta-address, or empty to clear.
+    function setStealthRecord(bytes calldata name, uint256 coinType, bytes calldata value)
+        external
+    {
+        NameState memory ctx = _context(name, false);
+        if (!_isAuthority(ctx, msg.sender)) revert Unauthorized(name, msg.sender);
+        // A flag byte with reserved bits zero, then a non-empty meta-address: a flag-only record
+        // would reach the verifier as an empty meta-address, i.e. unverified mode.
+        if (value.length != 0 && (value.length < 2 || uint8(value[0]) & 0xfe != 0)) {
+            revert MalformedRecord(value);
+        }
+        bytes32 node = NameCoder.namehash(name, 0);
+        _records[ctx.key][node][coinType] = value;
+        _recordKeys[node] = ctx.key;
+        emit StealthRecordChanged(node, name, coinType, value);
     }
 
-    /// @notice The config set on `node` itself.
-    function config(bytes32 node)
+    /// @notice Whether `account` may set the config of `name`: `name` is registered in an ENSv2
+    ///         `PermissionedRegistry` below a top-level name and `account` holds
+    ///         `ROLE_SET_RESOLVER` on its token (resource or registry-wide), as for
+    ///         `PermissionedRegistry.setResolver`.
+    /// @param name The DNS-encoded name.
+    /// @param account The account to check.
+    function canSetConfig(bytes calldata name, address account) external view returns (bool) {
+        NameState memory ctx = _context(name, false);
+        return ctx.exact && _isAuthority(ctx, account);
+    }
+
+    /// @notice Whether `account` may set the stealth records of `name`: as `canSetConfig`, for the
+    ///         nearest registered name at or above `name`.
+    /// @param name The DNS-encoded name.
+    /// @param account The account to check.
+    function canSetStealthRecord(bytes calldata name, address account)
+        external
+        view
+        returns (bool)
+    {
+        return _isAuthority(_context(name, false), account);
+    }
+
+    /// @notice The config set on the registered name `name` itself; empty for other names.
+    function config(bytes calldata name)
         external
         view
         returns (address recordsResolver, string[] memory urls)
     {
-        Config storage c = _configs[node];
+        NameState memory ctx = _context(name, false);
+        if (!ctx.exact) return (address(0), urls);
+        Config storage c = _configs[ctx.key];
         return (c.recordsResolver, c.gatewayURLs);
     }
 
@@ -210,23 +268,26 @@ contract StealthResolver is
     }
 
     /// @inheritdoc IStealthResolver
-    /// @dev ENSIP-30 Sections 2 and 5. The name's own URLs; through `resolve()` the effective
-    ///      URLs, which may be inherited from an ancestor.
+    /// @dev ENSIP-30 Sections 2 and 5. The URLs last set by `setConfig` on `node` itself; through
+    ///      `resolve()` the effective URLs, which may be inherited from an ancestor. A node cannot
+    ///      be walked through the registry, so after a re-registration this returns the previous
+    ///      holder's URLs until the new holder calls `setConfig`; `resolve()` never does.
     function gatewayURLs(bytes32 node) external view returns (string[] memory) {
-        return _configs[node].gatewayURLs;
+        return _configs[_configKeys[node]].gatewayURLs;
     }
 
     /// @inheritdoc IStealthResolver
-    /// @dev ENSIP-30 Section 5. A node cannot be walked to its ancestors, so the record is read
-    ///      from `node`'s own records resolver only: names that inherit their records resolver
-    ///      (wildcard names) are verified in the callback but revert `NoStealthRecord` here.
+    /// @dev ENSIP-30 Section 5. The record last written for `node`, wildcard names included. A
+    ///      node cannot be walked through the registry, so after a re-registration this verifies
+    ///      against the previous holder's record until the new holder writes; `resolve()` and the
+    ///      callback never do.
     function verifyStealthResolution(
         bytes32 node,
         uint256 coinType,
         address stealthAddress,
         bytes calldata verificationData
     ) external view returns (address) {
-        bytes memory record = _readRecord(_configs[node].recordsResolver, node, coinType);
+        bytes memory record = _records[_recordKeys[node]][node][coinType];
         if (record.length == 0) revert NoStealthRecord(node, coinType);
         return _verify(node, coinType, record, verificationData, stealthAddress);
     }
@@ -249,15 +310,14 @@ contract StealthResolver is
     }
 
     /// @inheritdoc ICompositeResolver
-    /// @dev The effective records resolver: where `name`'s records are read and edited.
+    /// @dev The effective records resolver: where `name`'s other records are read and edited.
     function getResolver(bytes calldata name) external view returns (address, bool) {
-        (address recordsResolver,) = _effectiveConfig(name);
-        return (recordsResolver, false);
+        return (_context(name, true).recordsResolver, false);
     }
 
     /// @notice ERC-3668 callback for address records.
-    /// @dev ENSIP-30 Section 4, step 3: verified if the effective records resolver of `name`
-    ///      holds the record for `coinType`, read onchain here; otherwise the verifier decides.
+    /// @dev ENSIP-30 Section 4, step 3: verified if the stealth record of `name` for `coinType` is
+    ///      stored, read here; otherwise the verifier decides.
     /// @param response `abi.encode(address stealthAddress, bytes verificationData)` from the gateway.
     /// @param extraData `abi.encode(name, coinType, legacy)`; `legacy` = `addr(bytes32)` was queried.
     /// @return The ABI-encoded result of the queried address profile.
@@ -270,8 +330,7 @@ contract StealthResolver is
             abi.decode(extraData, (bytes, uint256, bool));
         (address claimed, bytes memory verificationData) = abi.decode(response, (address, bytes));
         bytes32 node = NameCoder.namehash(name, 0);
-        (address recordsResolver,) = _effectiveConfig(name);
-        bytes memory record = _readRecord(recordsResolver, node, coinType);
+        bytes memory record = _records[_context(name, false).key][node][coinType];
         address resolved = record.length == 0
             ? VERIFIER.verify(node, coinType, "", verificationData, claimed)
             : _verify(node, coinType, record, verificationData, claimed);
@@ -301,38 +360,39 @@ contract StealthResolver is
         returns (bytes memory)
     {
         bytes4 selector = bytes4(data);
-        (address recordsResolver, string[] memory urls) = _effectiveConfig(name);
+        NameState memory ctx = _context(name, true);
         if (selector == IStealthResolver.gatewayURLs.selector) {
-            return abi.encode(urls);
+            return abi.encode(ctx.urls);
         }
         if (selector == IDataResolver.data.selector) {
             (, string memory key) = abi.decode(data[4:], (bytes32, string));
             (bool isStealthKey, uint256 coinType) = _parseStealthKey(key);
             if (isStealthKey) {
-                return abi.encode(_readRecord(recordsResolver, _checkNode(name, data), coinType));
+                return abi.encode(_records[ctx.key][_checkNode(name, data)][coinType]);
             }
         }
         bool legacy = selector == IAddrResolver.addr.selector;
         bool isAddr = legacy || selector == IAddressResolver.addr.selector;
-        if (isAddr && urls.length > 0) {
+        if (isAddr && ctx.urls.length > 0) {
             _checkNode(name, data);
             uint256 coinType = legacy ? COIN_TYPE_ETH : uint256(bytes32(data[36:68]));
             revert OffchainLookup(
                 address(this),
-                urls,
+                ctx.urls,
                 abi.encodeCall(IExtendedResolver.resolve, (name, data)),
                 this.resolveStealthCallback.selector,
                 abi.encode(name, coinType, legacy)
             );
         }
-        if (recordsResolver == address(0)) {
+        if (ctx.recordsResolver == address(0)) {
             // No records anywhere: unset address records, as standard ENS semantics (Section 4).
             if (legacy) return abi.encode(address(0));
             if (isAddr) return abi.encode(bytes(""));
             revert IUniversalResolver.UnsupportedResolverProfile(selector);
         }
-        return
-            callResolver(recordsResolver, name, data, false, "", BATCH_GATEWAY_PROVIDER.gateways());
+        return callResolver(
+            ctx.recordsResolver, name, data, false, "", BATCH_GATEWAY_PROVIDER.gateways()
+        );
     }
 
     /// @dev `resolve(name, multicall(calls))`: every call resolved as a single `resolve()` on this
@@ -354,26 +414,66 @@ contract StealthResolver is
         );
     }
 
-    /// @dev Per field, the name's own value, else the nearest ancestor's (root excluded).
-    function _effectiveConfig(bytes memory name)
+    /// @dev Walks `name` through the ENSv2 registry from the leaf up. The authority is the nearest
+    ///      registered name at or above the leaf, top-level names excluded (their parent is the
+    ///      root registry). With `withConfig`, also the effective config: per field, the value set
+    ///      by the nearest registered name that set it.
+    function _context(bytes memory name, bool withConfig)
         internal
         view
-        returns (address recordsResolver, string[] memory urls)
+        returns (NameState memory ctx)
     {
+        // registries[i]: the subregistry of the name at label i (leaf = 0); the last entry is the
+        // root registry. Label i sits in registries[i + 1].
+        IRegistry[] memory registries = LibRegistry.findRegistries(ROOT_REGISTRY, name, 0);
         uint256 offset;
         bool haveUrls;
-        while (true) {
-            (uint8 size, uint256 next) = NameCoder.nextLabel(name, offset);
-            if (size == 0) break;
-            Config storage c = _configs[NameCoder.namehash(name, offset)];
-            if (recordsResolver == address(0)) recordsResolver = c.recordsResolver;
+        for (uint256 i; i + 2 < registries.length; ++i) {
+            (bytes32 labelHash, uint256 next) = NameCoder.readLabel(name, offset);
+            offset = next;
+            IRegistry parent = registries[i + 1];
+            if (address(parent) == address(0)) continue;
+            (bool registered, uint256 resource) = _registered(parent, labelHash);
+            if (!registered) continue;
+            bytes32 key = keccak256(abi.encode(parent, resource));
+            if (ctx.key == bytes32(0)) {
+                ctx.key = key;
+                ctx.registry = IPermissionedRegistry(address(parent));
+                ctx.resource = resource;
+                ctx.exact = i == 0;
+                if (!withConfig) break;
+            }
+            Config storage c = _configs[key];
+            if (ctx.recordsResolver == address(0)) ctx.recordsResolver = c.recordsResolver;
             if (!haveUrls && c.gatewayURLs.length > 0) {
-                urls = c.gatewayURLs;
+                ctx.urls = c.gatewayURLs;
                 haveUrls = true;
             }
-            if (recordsResolver != address(0) && haveUrls) break;
-            offset = next;
+            if (ctx.recordsResolver != address(0) && haveUrls) break;
         }
+    }
+
+    /// @dev Whether `labelHash` is registered (not reserved, not expired) in `registry`, and its
+    ///      EAC resource. ENSv2 renews the resource when an expired name is registered again.
+    ///      A registry that is not a `PermissionedRegistry` registers nothing here.
+    function _registered(IRegistry registry, bytes32 labelHash)
+        internal
+        view
+        returns (bool registered, uint256 resource)
+    {
+        (bool ok, bytes memory v) = address(registry).staticcall(
+            abi.encodeCall(IPermissionedRegistry.getState, (uint256(labelHash)))
+        );
+        if (!ok || v.length < 160) return (false, 0);
+        uint256 status;
+        (status,,,, resource) = abi.decode(v, (uint256, uint256, uint256, uint256, uint256));
+        registered = status == uint256(IPermissionedRegistry.Status.REGISTERED);
+    }
+
+    /// @dev Whether `account` holds `ROLE_SET_RESOLVER` on the authority of `ctx`.
+    function _isAuthority(NameState memory ctx, address account) internal view returns (bool) {
+        return ctx.key != bytes32(0)
+            && ctx.registry.hasRoles(ctx.resource, RegistryRolesLib.ROLE_SET_RESOLVER, account);
     }
 
     /// @dev The namehash of `name`; reverts unless the profile calldata carries the same node.
@@ -383,29 +483,8 @@ contract StealthResolver is
         return node;
     }
 
-    /// @dev The ENSIP-30 Section 1 record value for `node` and `coinType` in `recordsResolver`,
-    ///      read directly with `data(node, key)`. The single read behind serving the record and
-    ///      verifying against it. A records resolver without ENSIP-24 support has no record; one
-    ///      that claims support but reverts fails the resolution.
-    function _readRecord(address recordsResolver, bytes32 node, uint256 coinType)
-        internal
-        view
-        returns (bytes memory)
-    {
-        if (
-            recordsResolver == address(0)
-                || !ERC165Checker.supportsInterface(recordsResolver, type(IDataResolver).interfaceId)
-        ) return "";
-        (bool ok, bytes memory v) = recordsResolver.staticcall(
-            abi.encodeCall(IDataResolver.data, (node, _stealthKey(coinType)))
-        );
-        if (!ok || v.length < 64) revert RecordUnavailable(node, coinType);
-        return abi.decode(v, (bytes));
-    }
-
-    /// @dev Verified mode: the record must be well formed (ENSIP-30 Section 1: a flag byte with
-    ///      reserved bits zero, then a non-empty meta-address); the verifier rederives from it and
-    ///      the result must equal `claimed`.
+    /// @dev Verified mode: the verifier rederives from the record (well formed, checked when
+    ///      written); the result must equal `claimed`.
     function _verify(
         bytes32 node,
         uint256 coinType,
@@ -413,7 +492,6 @@ contract StealthResolver is
         bytes memory verificationData,
         address claimed
     ) internal view returns (address) {
-        if (record.length < 2 || uint8(record[0]) & 0xfe != 0) revert MalformedRecord(record);
         address derived = VERIFIER.verify(
             node,
             coinType,

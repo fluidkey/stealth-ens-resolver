@@ -23,8 +23,8 @@ import {TEST_META} from "../utils/Constants.sol";
 
 /// @dev Against ENS's ENSv2 deployment on Sepolia (namechain docs/addresses/sepolia.md):
 ///      StealthResolver deployed through the deploy script, a fresh name registered in the live
-///      ETHRegistry, records in a PermissionedResolver deployed from ENS's implementation, and
-///      resolution through the live UniversalResolverV2. Runs when SEPOLIA_RPC_URL is set.
+///      ETHRegistry, other records in a PermissionedResolver deployed from ENS's implementation,
+///      and resolution through the live UniversalResolverV2. Runs when SEPOLIA_RPC_URL is set.
 ///      Pinned to a block where LABEL is available, so the test cannot break when the label is
 ///      registered later; the RPC must serve historical state (archive).
 contract SepoliaENSv2ForkTest is CCIPClient {
@@ -91,8 +91,8 @@ contract SepoliaENSv2ForkTest is CCIPClient {
 
         vm.startPrank(alice);
         records.setText(nameNode, "url", "https://alice.example");
-        records.setData(nameNode, "stealth-meta-address[1][60]", TEST_META);
         resolver.setConfig(name, address(records), _urls());
+        resolver.setStealthRecord(name, 60, TEST_META);
         vm.stopPrank();
     }
 

@@ -30,6 +30,13 @@ contract GasTest is StealthResolverFixture {
         vm.snapshotValue("Gas", "setConfig_recordsResolver_oneUrl", before - gasleft());
     }
 
+    function test_gas_setStealthRecord() public {
+        vm.prank(alice);
+        uint256 before = gasleft();
+        resolver.setStealthRecord(dns("alice.fkey.eth"), COIN_ETH, META);
+        vm.snapshotValue("Gas", "setStealthRecord_67bytes", before - gasleft());
+    }
+
     function test_gas_reads() public {
         setUpAliceVerified(COIN_ETH);
         vm.prank(fluidkey);
