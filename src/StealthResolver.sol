@@ -11,6 +11,7 @@ import {IAddressResolver} from "@ens/contracts/resolvers/profiles/IAddressResolv
 import {ICompositeResolver} from "@ens/contracts/resolvers/profiles/ICompositeResolver.sol";
 import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol";
 import {IExtendedResolver} from "@ens/contracts/resolvers/profiles/IExtendedResolver.sol";
+import {IUniversalResolver} from "@ens/contracts/universalResolver/IUniversalResolver.sol";
 import {ResolverCaller} from "@ens/contracts/universalResolver/ResolverCaller.sol";
 import {BytesUtils} from "@ens/contracts/utils/BytesUtils.sol";
 import {COIN_TYPE_ETH} from "@ens/contracts/utils/ENSIP19.sol";
@@ -96,9 +97,6 @@ contract StealthResolver is
 
     /// @notice The stealth meta-address record is malformed (ENSIP-30 Section 1).
     error MalformedRecord(bytes record);
-
-    /// @notice The record cannot be answered: no records resolver is configured for the name.
-    error UnsupportedResolverProfile(bytes4 selector);
 
     ////////////////////////////////////////////////////////////////////////
     // Initialization
@@ -306,7 +304,7 @@ contract StealthResolver is
             // No records anywhere: unset address records, as standard ENS semantics (Section 4).
             if (legacy) return abi.encode(address(0));
             if (isAddr) return abi.encode(bytes(""));
-            revert UnsupportedResolverProfile(selector);
+            revert IUniversalResolver.UnsupportedResolverProfile(selector);
         }
         return
             callResolver(recordsResolver, name, data, false, "", BATCH_GATEWAY_PROVIDER.gateways());

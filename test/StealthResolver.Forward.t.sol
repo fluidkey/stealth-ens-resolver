@@ -8,6 +8,7 @@ import {IAddressResolver} from "@ens/contracts/resolvers/profiles/IAddressResolv
 import {IContentHashResolver} from "@ens/contracts/resolvers/profiles/IContentHashResolver.sol";
 import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol";
 import {ITextResolver} from "@ens/contracts/resolvers/profiles/ITextResolver.sol";
+import {IUniversalResolver} from "@ens/contracts/universalResolver/IUniversalResolver.sol";
 import {NameCoder} from "@ens/contracts/utils/NameCoder.sol";
 import {IRegistry} from "~src/registry/interfaces/IRegistry.sol";
 import {RegistryRolesLib} from "~src/registry/libraries/RegistryRolesLib.sol";
@@ -81,7 +82,7 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         );
         vm.expectRevert(
             abi.encodeWithSelector(
-                StealthResolver.UnsupportedResolverProfile.selector, ITextResolver.text.selector
+                IUniversalResolver.UnsupportedResolverProfile.selector, ITextResolver.text.selector
             )
         );
         resolver.resolve(name, abi.encodeCall(ITextResolver.text, (n, "url")));
