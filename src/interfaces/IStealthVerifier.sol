@@ -11,8 +11,9 @@ interface IStealthVerifier {
 
     /// @notice Derives or accepts the stealth address for one resolution.
     /// @dev Verified mode (`metaAddress` non-empty): returns the address derived from `metaAddress`
-    ///      and `verificationData`; the resolver requires it to equal `claimed`. Reverts on a
-    ///      malformed `metaAddress` (ENSIP-30 Section 1, failure semantics).
+    ///      and `verificationData`; the resolver requires it to equal `claimed`. The result must
+    ///      not depend on `claimed`. Reverts on a malformed `metaAddress` (ENSIP-30 Section 1,
+    ///      failure semantics).
     ///      Unverified mode (`metaAddress` empty, ENSIP-30 Section 4, step 3): the verifier decides
     ///      what, if anything, to check, and returns the address to resolve to.
     ///      `node` and `coinType` identify the resolution so a verifier can bind gateway-supplied
