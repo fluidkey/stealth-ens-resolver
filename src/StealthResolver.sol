@@ -14,7 +14,7 @@ import {IExtendedResolver} from "@ens/contracts/resolvers/profiles/IExtendedReso
 import {IUniversalResolver} from "@ens/contracts/universalResolver/IUniversalResolver.sol";
 import {ResolverCaller} from "@ens/contracts/universalResolver/ResolverCaller.sol";
 import {BytesUtils} from "@ens/contracts/utils/BytesUtils.sol";
-import {COIN_TYPE_ETH} from "@ens/contracts/utils/ENSIP19.sol";
+import {COIN_TYPE_ETH, ENSIP19} from "@ens/contracts/utils/ENSIP19.sol";
 import {IERC7996} from "@ens/contracts/utils/IERC7996.sol";
 import {NameCoder} from "@ens/contracts/utils/NameCoder.sol";
 import {IPermissionedRegistry} from "@ensv2/registry/interfaces/IPermissionedRegistry.sol";
@@ -46,9 +46,10 @@ import {IStealthVerifier} from "./interfaces/IStealthVerifier.sol";
 ///      registered again, so a previous holder's state is never read.
 ///
 ///      Per query for a DNS-encoded name N (config fields: N's own, else the nearest ancestor's):
-///      - Address record, effective gateway URLs non-empty: `OffchainLookup` to them; the callback
-///        verifies if the stealth record for the coin type is stored, otherwise the verifier
-///        decides (unverified mode).
+///      - EVM address record, effective gateway URLs non-empty: `OffchainLookup` to them; the
+///        callback verifies if the stealth record for the coin type is stored, otherwise the
+///        verifier decides (unverified mode). Non-EVM address records are forwarded: the verifier
+///        answers with an EVM address.
 ///      - ENSIP-30 Section 1 record of this resolver's scheme: answered from storage, the same
 ///        value the callback verifies against.
 ///      - Anything else: forwarded to the effective records resolver.
@@ -125,8 +126,8 @@ contract StealthResolver is
     /// @notice `account` may not write this state of `name`.
     error Unauthorized(bytes name, address account);
 
-    /// @notice A name's records resolver cannot be this resolver.
-    error InvalidRecordsResolver();
+    /// @notice A records resolver must be a contract other than this resolver.
+    error InvalidRecordsResolver(address recordsResolver);
 
     /// @notice The node in the resolver calldata is not the namehash of the DNS-encoded name.
     error NodeMismatch(bytes32 node, bytes32 nameNode);
@@ -189,7 +190,12 @@ contract StealthResolver is
     {
         NameState memory ctx = _context(name, false);
         if (!ctx.exact || !_isAuthority(ctx, msg.sender)) revert Unauthorized(name, msg.sender);
-        if (recordsResolver == address(this)) revert InvalidRecordsResolver();
+        // Not this resolver (every query would recurse); not an account without code (forwarded
+        // reads would fail while the name silently resolved unverified).
+        if (
+            recordsResolver == address(this)
+                || (recordsResolver != address(0) && recordsResolver.code.length == 0)
+        ) revert InvalidRecordsResolver(recordsResolver);
         bytes32 node = NameCoder.namehash(name, 0);
         Config storage c = _configs[ctx.key];
         c.recordsResolver = recordsResolver;
@@ -317,7 +323,7 @@ contract StealthResolver is
 
     /// @notice ERC-3668 callback for address records.
     /// @dev ENSIP-30 Section 4, step 3: verified if the stealth record of `name` for `coinType` is
-    ///      stored, read here; otherwise the verifier decides.
+    ///      stored, read here; otherwise the verifier decides. The zero address is an unset record.
     /// @param response `abi.encode(address stealthAddress, bytes verificationData)` from the gateway.
     /// @param extraData `abi.encode(name, coinType, legacy)`; `legacy` = `addr(bytes32)` was queried.
     /// @return The ABI-encoded result of the queried address profile.
@@ -334,7 +340,8 @@ contract StealthResolver is
         address resolved = record.length == 0
             ? VERIFIER.verify(node, coinType, "", verificationData, claimed)
             : _verify(node, coinType, record, verificationData, claimed);
-        return legacy ? abi.encode(resolved) : abi.encode(abi.encodePacked(resolved));
+        if (legacy) return abi.encode(resolved);
+        return abi.encode(resolved == address(0) ? bytes("") : abi.encodePacked(resolved));
     }
 
     /// @notice CCIP-Read success callback for `resolve(name, multicall(...))`.
@@ -362,6 +369,7 @@ contract StealthResolver is
         bytes4 selector = bytes4(data);
         NameState memory ctx = _context(name, true);
         if (selector == IStealthResolver.gatewayURLs.selector) {
+            _checkNode(name, data);
             return abi.encode(ctx.urls);
         }
         if (selector == IDataResolver.data.selector) {
@@ -373,9 +381,9 @@ contract StealthResolver is
         }
         bool legacy = selector == IAddrResolver.addr.selector;
         bool isAddr = legacy || selector == IAddressResolver.addr.selector;
-        if (isAddr && ctx.urls.length > 0) {
+        uint256 coinType = isAddr && !legacy ? uint256(bytes32(data[36:68])) : COIN_TYPE_ETH;
+        if (isAddr && ctx.urls.length > 0 && ENSIP19.isEVMCoinType(coinType)) {
             _checkNode(name, data);
-            uint256 coinType = legacy ? COIN_TYPE_ETH : uint256(bytes32(data[36:68]));
             revert OffchainLookup(
                 address(this),
                 ctx.urls,
@@ -397,6 +405,8 @@ contract StealthResolver is
 
     /// @dev `resolve(name, multicall(calls))`: every call resolved as a single `resolve()` on this
     ///      contract, offchain lookups combined through the batch gateway. Never returns normally.
+    ///      Safety, not convenience: forwarded whole, an address call inside the batch would reach
+    ///      the records resolver and bypass the gateway path.
     function _resolveMulticall(bytes calldata name, bytes calldata data) internal view {
         bytes[] memory calls = abi.decode(data[4:], (bytes[]));
         for (uint256 i; i < calls.length; ++i) {

@@ -3,6 +3,8 @@ pragma solidity 0.8.25;
 
 import {EIP3668} from "@ens/contracts/ccipRead/EIP3668.sol";
 import {IBatchGateway} from "@ens/contracts/ccipRead/IBatchGateway.sol";
+
+import {IMulticallable} from "@ens/contracts/resolvers/IMulticallable.sol";
 import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol";
 import {IAddressResolver} from "@ens/contracts/resolvers/profiles/IAddressResolver.sol";
 import {IContentHashResolver} from "@ens/contracts/resolvers/profiles/IContentHashResolver.sol";
@@ -126,6 +128,21 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         aliceRecords.setData(aliceNode, key, META);
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
         assertEq(_data("alice.fkey.eth", key).length, 0);
+    }
+
+    /// @dev Only `addr`, `addr(coinType)` and `multicall` take the gateway path; other selectors
+    ///      are forwarded, so a static address in the records resolver of a gateway-configured
+    ///      name is readable through them. Pinned until per-coin-type coexistence is decided.
+    function test_otherSelectorsReachStaticAddress() public {
+        vm.prank(fluidkey);
+        fkeyRecords.setAddr(bobNode, address(0xBEEF));
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = abi.encodeCall(IAddrResolver.addr, (bobNode));
+        bytes memory v = resolver.resolve(
+            dns("bob.fkey.eth"),
+            abi.encodeCall(IMulticallable.multicallWithNodeCheck, (bobNode, calls))
+        );
+        assertEq(abi.decode(abi.decode(v, (bytes[]))[0], (address)), address(0xBEEF));
     }
 
     function test_addressWithoutGatewayForwarded() public {

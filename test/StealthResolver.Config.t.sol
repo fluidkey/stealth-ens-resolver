@@ -108,8 +108,23 @@ contract StealthResolverConfigTest is StealthResolverFixture {
 
     function test_setConfig_selfAsRecordsResolverReverts() public {
         vm.prank(alice);
-        vm.expectRevert(StealthResolver.InvalidRecordsResolver.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                StealthResolver.InvalidRecordsResolver.selector, address(resolver)
+            )
+        );
         resolver.setConfig(dns("alice.fkey.eth"), address(resolver), new string[](0));
+    }
+
+    /// @dev A mistyped records resolver would fail every forwarded read while the name silently
+    ///      resolved unverified.
+    function test_setConfig_accountWithoutCodeReverts() public {
+        address eoa = makeAddr("eoa");
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.InvalidRecordsResolver.selector, eoa)
+        );
+        resolver.setConfig(dns("alice.fkey.eth"), eoa, new string[](0));
     }
 
     /// @dev Zero records resolver and empty URLs fall back to the nearest ancestor's.
@@ -194,5 +209,14 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         string[] memory effective = abi.decode(v, (string[]));
         assertEq(effective.length, 1);
         assertEq(effective[0], STEALTH_GW);
+    }
+
+    function test_gatewayURLs_nodeMustMatchName() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NodeMismatch.selector, aliceNode, bobNode)
+        );
+        resolver.resolve(
+            dns("bob.fkey.eth"), abi.encodeCall(IStealthResolver.gatewayURLs, (aliceNode))
+        );
     }
 }

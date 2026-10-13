@@ -145,7 +145,26 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         assertTrue(ok, "record read at callback time");
     }
 
+    function test_verified_recordAddedBetweenLookupAndCallback() public {
+        EIP3668.Params memory p = _lookup("alice.fkey.eth");
+        setRecord(alice, "alice.fkey.eth", COIN_ETH, META);
+        (bool ok,) = callback(p, abi.encode(makeAddr("attacker"), VD));
+        assertFalse(ok, "record read at callback time");
+    }
+
     // Unverified.
+
+    /// @dev A gateway answers "no address on this chain" with the zero address: an unset record,
+    ///      empty bytes for `addr(coinType)` as for any ENS resolver.
+    function test_unverified_zeroAddressIsUnset() public view {
+        (bool ok, bytes memory v) =
+            callback(_lookupCoin("bob.fkey.eth", COIN_BASE), abi.encode(address(0), bytes("ok")));
+        assertTrue(ok);
+        assertEq(abi.decode(abi.decode(v, (bytes)), (bytes)).length, 0);
+        (ok, v) = callback(_lookup("bob.fkey.eth"), abi.encode(address(0), bytes("ok")));
+        assertTrue(ok);
+        assertEq(_resolved(v), address(0));
+    }
 
     function test_unverified_wildcardReturnsGatewayAddress() public {
         address chosen = makeAddr("chosen");
@@ -160,6 +179,24 @@ contract StealthResolverAddrTest is StealthResolverFixture {
             callback(_lookup("bob.fkey.eth"), abi.encode(address(1), bytes("reject")));
         assertFalse(ok);
         assertEq(bytes4(v), MockVerifier.Rejected.selector);
+    }
+
+    // Non-EVM coin types: forwarded, the verifier answers with an EVM address.
+
+    function test_nonEvmCoinType_forwarded() public {
+        bytes memory btc = hex"0014aabbccddeeff00112233445566778899aabbccdd";
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
+        vm.prank(alice);
+        aliceRecords.setAddr(aliceNode, 0, btc);
+        bytes memory v = resolver.resolve(
+            dns("alice.fkey.eth"), abi.encodeCall(IAddressResolver.addr, (aliceNode, 0))
+        );
+        assertEq(abi.decode(v, (bytes)), btc, "static Bitcoin address, no lookup");
+    }
+
+    function test_defaultEvmCoinType_goesToGateway() public view {
+        EIP3668.Params memory p = _lookupCoin("bob.fkey.eth", 1 << 31);
+        assertEq(p.urls[0], STEALTH_GW);
     }
 
     // Wildcard names: the record is written by the nearest registered ancestor.
