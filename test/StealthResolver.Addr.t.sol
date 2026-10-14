@@ -58,6 +58,26 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         return verifier.derive(metaWithoutFlag(), VD);
     }
 
+    /// @dev `verifyStealthResolution` calldata for `resolve()`, the only way it is answered.
+    function _verifyCall(string memory name, uint256 coinType, address claimed)
+        internal
+        pure
+        returns (bytes memory)
+    {
+        return abi.encodeCall(
+            IStealthResolver.verifyStealthResolution, (node(name), coinType, claimed, VD)
+        );
+    }
+
+    function _verify(string memory name, uint256 coinType, address claimed)
+        internal
+        view
+        returns (address)
+    {
+        return
+            abi.decode(resolver.resolve(dns(name), _verifyCall(name, coinType, claimed)), (address));
+    }
+
     // Lookup shape (step 1).
 
     function test_lookupShape() public view {
@@ -204,7 +224,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         vm.expectRevert(
             abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, aliceNode, COIN_BASE)
         );
-        resolver.verifyStealthResolution(aliceNode, COIN_BASE, derived, VD);
+        resolver.resolve(dns("alice.fkey.eth"), _verifyCall("alice.fkey.eth", COIN_BASE, derived));
     }
 
     function test_verified_recordRemovedBetweenLookupAndCallback() public {
@@ -412,26 +432,24 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         assertFalse(ok);
     }
 
-    // verifyStealthResolution (Section 5).
+    // verifyStealthResolution (Section 5), through resolve().
 
-    function test_verifyStealthResolution() public {
+    function test_verifyThroughResolve_registeredName() public {
         setUpAliceVerified(COIN_ETH);
-        assertEq(resolver.verifyStealthResolution(aliceNode, COIN_ETH, _derived(), VD), _derived());
+        address derived = _derived();
+        assertEq(_verify("alice.fkey.eth", COIN_ETH, derived), derived);
         vm.expectRevert(
             abi.encodeWithSelector(
-                StealthResolver.StealthAddressMismatch.selector, address(0xBAD), _derived()
+                StealthResolver.StealthAddressMismatch.selector, address(0xBAD), derived
             )
         );
-        resolver.verifyStealthResolution(aliceNode, COIN_ETH, address(0xBAD), VD);
+        resolver.resolve(
+            dns("alice.fkey.eth"), _verifyCall("alice.fkey.eth", COIN_ETH, address(0xBAD))
+        );
     }
 
-    /// @dev Out-of-flow verification covers wildcard names too.
-    function test_verifyStealthResolution_wildcardName() public {
-        _setBobRecord();
-        assertEq(resolver.verifyStealthResolution(bobNode, COIN_ETH, _derived(), VD), _derived());
-    }
-
-    /// @dev Through `resolve()` the record is located by name, as for every other query.
+    /// @dev The record is located by name, as for every other query: out-of-flow verification
+    ///      covers wildcard names too.
     function test_verifyThroughResolve() public {
         _setBobRecord();
         address derived = _derived();
@@ -462,10 +480,10 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         resolver.resolve(dns("bob.fkey.eth"), call);
     }
 
-    function test_verifyStealthResolution_missingRecordReverts() public {
+    function test_verifyThroughResolve_missingRecordReverts() public {
         vm.expectRevert(
             abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, bobNode, COIN_ETH)
         );
-        resolver.verifyStealthResolution(bobNode, COIN_ETH, address(1), "");
+        resolver.resolve(dns("bob.fkey.eth"), _verifyCall("bob.fkey.eth", COIN_ETH, address(1)));
     }
 }

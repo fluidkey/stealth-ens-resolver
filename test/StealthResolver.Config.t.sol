@@ -51,7 +51,10 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         (address records, string[] memory own) = resolver.config(dns("alice.fkey.eth"));
         assertEq(records, address(aliceRecords));
         assertEq(own[0], "https://alice.gw");
-        assertEq(resolver.gatewayURLs(aliceNode)[0], "https://alice.gw");
+        bytes memory v = resolver.resolve(
+            dns("alice.fkey.eth"), abi.encodeCall(IStealthResolver.gatewayURLs, (aliceNode))
+        );
+        assertEq(abi.decode(v, (string[]))[0], "https://alice.gw");
     }
 
     function test_setConfig_byDelegatedSetResolverRole() public {
@@ -176,7 +179,12 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         vm.expectRevert(
             abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, aliceNode, COIN_ETH)
         );
-        resolver.verifyStealthResolution(aliceNode, COIN_ETH, address(1), "");
+        resolver.resolve(
+            dns("alice.fkey.eth"),
+            abi.encodeCall(
+                IStealthResolver.verifyStealthResolution, (aliceNode, COIN_ETH, address(1), "")
+            )
+        );
     }
 
     // Chain lists.
@@ -255,11 +263,29 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         assertEq(r, address(0), "none");
     }
 
+    /// @dev The ENSIP-30 Section 5 functions take a node, which cannot be walked to the name's
+    ///      authority: called directly they revert; through `resolve()` they are answered by name.
+    function test_section5_resolveOnly() public {
+        setUpAliceVerified(COIN_ETH);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                StealthResolver.ResolveOnly.selector, IStealthResolver.gatewayURLs.selector
+            )
+        );
+        resolver.gatewayURLs(aliceNode);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                StealthResolver.ResolveOnly.selector,
+                IStealthResolver.verifyStealthResolution.selector
+            )
+        );
+        resolver.verifyStealthResolution(aliceNode, COIN_ETH, address(1), "");
+    }
+
     /// @dev Through `resolve()` a wildcard name reports its authority's URLs; a registered name
     ///      only its own.
     function test_gatewayURLs_throughResolve() public {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
-        assertEq(resolver.gatewayURLs(aliceNode).length, 0, "direct: own only");
         bytes memory v = resolver.resolve(
             dns("alice.fkey.eth"), abi.encodeCall(IStealthResolver.gatewayURLs, (aliceNode))
         );

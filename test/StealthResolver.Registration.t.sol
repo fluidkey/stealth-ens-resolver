@@ -58,6 +58,16 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
         assertEq(_record("alice.fkey.eth").length, 0, "alice's record not served");
         (address r,) = resolver.getResolver(dns("alice.fkey.eth"));
         assertEq(r, address(0), "alice's config not read");
+        bytes memory call = abi.encodeCall(
+            IStealthResolver.verifyStealthResolution,
+            (aliceNode, COIN_ETH, verifier.derive(metaWithoutFlag(), VD), VD)
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, aliceNode, COIN_ETH)
+        );
+        resolver.resolve(dns("alice.fkey.eth"), call);
+        call = abi.encodeCall(IStealthResolver.gatewayURLs, (aliceNode));
+        assertEq(abi.decode(resolver.resolve(dns("alice.fkey.eth"), call), (string[])).length, 0);
 
         setConfig(carol, "alice.fkey.eth", address(0), STEALTH_GW);
         setChain(carol, "alice.fkey.eth", COIN_ETH, true);
@@ -72,35 +82,6 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
         setUpAliceVerified(COIN_ETH);
         _reregisterAlice(alice);
         assertEq(_record("alice.fkey.eth").length, 0);
-    }
-
-    /// @dev The node-based ENSIP-30 Section 5 functions cannot walk the registry: they see the
-    ///      previous holder's state until the new holder writes.
-    function test_reregistration_nodeFunctionsLag() public {
-        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "https://alice.gw");
-        setChain(alice, "alice.fkey.eth", COIN_ETH, true);
-        setMeta(alice, "alice.fkey.eth", META);
-        address derived = verifier.derive(metaWithoutFlag(), VD);
-        _reregisterAlice(carol);
-        assertEq(resolver.verifyStealthResolution(aliceNode, COIN_ETH, derived, VD), derived);
-        assertEq(resolver.gatewayURLs(aliceNode)[0], "https://alice.gw");
-
-        // Through resolve() the name is known: no lag.
-        bytes memory call = abi.encodeCall(
-            IStealthResolver.verifyStealthResolution, (aliceNode, COIN_ETH, derived, VD)
-        );
-        vm.expectRevert(
-            abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, aliceNode, COIN_ETH)
-        );
-        resolver.resolve(dns("alice.fkey.eth"), call);
-
-        setMeta(carol, "alice.fkey.eth", "");
-        setConfig(carol, "alice.fkey.eth", address(0), "");
-        vm.expectRevert(
-            abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, aliceNode, COIN_ETH)
-        );
-        resolver.verifyStealthResolution(aliceNode, COIN_ETH, derived, VD);
-        assertEq(resolver.gatewayURLs(aliceNode).length, 0);
     }
 
     /// @dev Re-registering the parent drops everything written under its authority: config and

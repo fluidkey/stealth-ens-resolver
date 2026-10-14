@@ -44,8 +44,8 @@ registered ancestor. Nothing is inherited past a registered name.
 | `data(node, "stealth-meta-address[<scheme>][<coinType>]")` | N's meta-address if the coin type is on the chain list, otherwise empty: the value the callback verifies against. |
 | Any other record | Forwarded to the records resolver, including offchain ones. |
 | `resolve(name, multicall(...))` | Answered as one batch (ERC-7996 `RESOLVE_MULTICALL`). |
-| `gatewayURLs(node)` | N's own URLs; through `resolve()`, its authority's. |
-| `verifyStealthResolution(node, coinType, address, verificationData)` | Through `resolve()`: verified against N's record, located by name like every other query (wildcard names included, no lag after re-registration). Called directly: see Re-registration. |
+| `gatewayURLs(node)` | N's authority's URLs. Through `resolve()` only: called directly it reverts `ResolveOnly` (see Section 5 by name). |
+| `verifyStealthResolution(node, coinType, address, verificationData)` | Verified against N's record, located by name like every other query, wildcard names included. Through `resolve()` only, as above; no CCIP-Read is involved, so contracts can call it onchain. |
 | `getResolver(name)` (`ICompositeResolver`) | The records resolver, so apps know where to edit other records. |
 
 **The record served is the record verified**, for every name, wildcard names included. Only the
@@ -105,14 +105,20 @@ To use a parent's gateway, a registered name sets the same URLs itself. Its owne
 holder of `ROLE_SET_RESOLVER` on it.
 
 **Re-registration.** State is keyed by the authority's ENSv2 resource, which the registry renews
-when an expired name is registered again, to anyone. `resolve()` therefore never reads a previous
-holder's config or records, and the new holder starts empty. An expired name that is not registered
-again resolves as a wildcard name of its parent. Called directly, `gatewayURLs(node)` and
-`verifyStealthResolution(node, ...)` have only a node, which cannot be walked through the registry:
-they read the state last written for that node and so see the previous holder's state until the new
-holder writes. Query them through `resolve(name, data)`, directly or through the UniversalResolver,
-to have them answered by name; out-of-flow verifiers and contracts consuming stealth resolutions
-should do so (no CCIP-Read is involved).
+when an expired name is registered again, to anyone. A previous holder's config and records are
+therefore never read, and the new holder starts empty. An expired name that is not registered again
+resolves as a wildcard name of its parent.
+
+**Section 5 by name.** `gatewayURLs(node)` and `verifyStealthResolution(node, ...)` are answered
+only through ENSIP-10 `resolve(name, data)`, directly or through the UniversalResolver, which wraps
+every profile call that way. A node alone cannot be walked through the registry to the name's
+authority, so a direct call reverts `ResolveOnly`; the interface is still reported through ERC-165.
+Out-of-flow verifiers and contracts consuming stealth resolutions call
+`resolve(name, verifyStealthResolution(...))`. This departs from the ENSIP draft, whose Section 2
+has clients call `gatewayURLs(node)` and whose Section 5 implies both functions answer a direct
+call; it is raised against the ENSIP. The alternative, remembering per node which authority wrote
+last, costs a storage write per `setConfig` and `setMetaAddress` and answers for a previous holder
+after a re-registration until the new holder writes.
 
 ### Setting up a name for verified resolution
 
@@ -142,7 +148,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 20,786 | 3,790 |
+| `StealthResolver` | 20,547 | 4,029 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
 `eth_call` costs; verified-mode numbers use a mock verifier and exclude the scheme's curve arithmetic.
@@ -155,12 +161,12 @@ read cost.
 | `resolve` registered name, address, `OffchainLookup` revert | 23,191 |
 | `resolveStealthCallback`, unverified (wildcard name) | 43,675 + verifier |
 | `resolveStealthCallback`, verified (registered name) | 29,100 + verifier |
-| `verifyStealthResolution` | 6,991 + verifier |
+| `resolve` registered name, `verifyStealthResolution` | 26,778 + verifier |
 | `resolve` text, forwarded to a `PermissionedResolver` | 61,211 |
 | `text` on the `PermissionedResolver` directly (reference) | 3,261 |
-| `setConfig`, records resolver and one URL (transaction) | 163,076 |
+| `setConfig`, records resolver and one URL (transaction) | 140,884 |
 | `setChains`, one chain (transaction) | 88,931 |
-| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 178,601 |
+| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 156,409 |
 
 ## Build and test
 

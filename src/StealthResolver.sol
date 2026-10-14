@@ -37,7 +37,8 @@ import {IStealthVerifier} from "./interfaces/IStealthVerifier.sol";
 ///      stealth). Every other record is forwarded to the records resolver through ENS's
 ///      `ResolverCaller`, as ENS's mirror resolvers do.
 ///
-///      Queried only through ENSIP-10 `resolve()`; no profile is answered directly.
+///      Queried only through ENSIP-10 `resolve()`; no profile is answered directly, the ENSIP-30
+///      Section 5 functions included (a node alone cannot be walked to the name's authority).
 ///
 ///      Authority. All state is written under the ENSv2 rule for setting a name's resolver
 ///      (`ROLE_SET_RESOLVER` on the name's token, not expired), applied to the nearest registered
@@ -108,11 +109,6 @@ contract StealthResolver is
     ///      the nearest registered name at or above `node`.
     mapping(bytes32 key => mapping(bytes32 node => bytes)) private _metaAddresses;
 
-    /// @dev Authority key of the last `setConfig` / `setMetaAddress` for `node`, for the
-    ///      node-based ENSIP-30 Section 5 functions only.
-    mapping(bytes32 node => bytes32 key) private _configKeys;
-    mapping(bytes32 node => bytes32 key) private _metaAddressKeys;
-
     ////////////////////////////////////////////////////////////////////////
     // Events and errors
     ////////////////////////////////////////////////////////////////////////
@@ -141,6 +137,10 @@ contract StealthResolver is
 
     /// @notice The node in the resolver calldata is not the namehash of the DNS-encoded name.
     error NodeMismatch(bytes32 node, bytes32 nameNode);
+
+    /// @notice `selector` is answered only through ENSIP-10 `resolve(name, data)`: a node alone
+    ///         cannot be walked through the registry to the name's authority.
+    error ResolveOnly(bytes4 selector);
 
     /// @notice The gateway's address does not derive from the name's meta-address.
     error StealthAddressMismatch(address claimed, address derived);
@@ -212,7 +212,6 @@ contract StealthResolver is
         Config storage c = _configs[ctx.key];
         c.recordsResolver = recordsResolver;
         c.gatewayURLs = urls;
-        _configKeys[node] = ctx.key;
         emit ConfigChanged(node, name, recordsResolver, urls);
     }
 
@@ -256,7 +255,6 @@ contract StealthResolver is
         }
         bytes32 node = NameCoder.namehash(name, 0);
         _metaAddresses[ctx.key][node] = value;
-        _metaAddressKeys[node] = ctx.key;
         emit MetaAddressChanged(node, name, value);
     }
 
@@ -313,31 +311,25 @@ contract StealthResolver is
     }
 
     /// @inheritdoc IStealthResolver
-    /// @dev ENSIP-30 Sections 2 and 5. The URLs last set by `setConfig` on `node` itself; through
-    ///      `resolve()` those of the name's authority (for a wildcard name, its nearest registered
-    ///      ancestor). A node cannot be walked through the registry, so after a re-registration
-    ///      this returns the previous holder's URLs until the new holder calls `setConfig`;
-    ///      `resolve()` never does.
-    function gatewayURLs(bytes32 node) external view returns (string[] memory) {
-        return _configs[_configKeys[node]].gatewayURLs;
+    /// @dev ENSIP-30 Sections 2 and 5. Answered through ENSIP-10 `resolve(name, data)` only, as
+    ///      every other query: there the name's authority is located in the registry (for a
+    ///      wildcard name, its nearest registered ancestor), which a node alone cannot be. Called
+    ///      directly, reverts `ResolveOnly`.
+    function gatewayURLs(bytes32) external pure returns (string[] memory) {
+        revert ResolveOnly(IStealthResolver.gatewayURLs.selector);
     }
 
     /// @inheritdoc IStealthResolver
-    /// @dev ENSIP-30 Section 5. Prefer querying it through ENSIP-10 `resolve(name, data)` (directly
-    ///      or through the UniversalResolver): there the record is located by name, as for every
-    ///      other query. Called directly, only the node is known, which cannot be walked through the
-    ///      registry: this reads the meta-address last written for `node` (wildcard names
-    ///      included), if `coinType` is on the chain list of its writer, so after a re-registration
-    ///      it verifies against the previous holder's record until the new holder writes.
-    function verifyStealthResolution(
-        bytes32 node,
-        uint256 coinType,
-        address stealthAddress,
-        bytes calldata verificationData
-    ) external view returns (address) {
-        return _verifyResolution(
-            _metaAddressKeys[node], node, coinType, stealthAddress, verificationData
-        );
+    /// @dev ENSIP-30 Section 5. As `gatewayURLs`: through `resolve(name, data)` only, directly or
+    ///      through the UniversalResolver (no CCIP-Read is involved). Out-of-flow verifiers and
+    ///      contracts consuming stealth resolutions call it that way. Called directly, reverts
+    ///      `ResolveOnly`.
+    function verifyStealthResolution(bytes32, uint256, address, bytes calldata)
+        external
+        pure
+        returns (address)
+    {
+        revert ResolveOnly(IStealthResolver.verifyStealthResolution.selector);
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -550,9 +542,9 @@ contract StealthResolver is
         return node;
     }
 
-    /// @dev `verifyStealthResolution` under the authority `key`, shared by the direct function, the
-    ///      `resolve()` path and the callback's verified mode (ENSIP-30 Section 4: the callback is a
-    ///      thin wrapper over it).
+    /// @dev `verifyStealthResolution` under the authority `key`, shared by the `resolve()` path and
+    ///      the callback's verified mode (ENSIP-30 Section 4: the callback is a thin wrapper over
+    ///      it).
     function _verifyResolution(
         bytes32 key,
         bytes32 node,

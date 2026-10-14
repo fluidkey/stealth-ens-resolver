@@ -5,6 +5,7 @@ import {EIP3668} from "@ens/contracts/ccipRead/EIP3668.sol";
 import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol";
 import {ITextResolver} from "@ens/contracts/resolvers/profiles/ITextResolver.sol";
 
+import {IStealthResolver} from "../src/interfaces/IStealthResolver.sol";
 import {StealthResolverFixture} from "./utils/StealthResolverFixture.sol";
 
 /// @dev Gas of StealthResolver's own work, written to `snapshots/Gas.json` and checked in CI.
@@ -103,11 +104,17 @@ contract GasTest is StealthResolverFixture {
         );
         assertTrue(
             _measure(
-                "verifyStealthResolution_mockVerifier",
+                "resolve_verifyStealthResolution_mockVerifier",
                 address(resolver),
                 abi.encodeCall(
-                    resolver.verifyStealthResolution,
-                    (aliceNode, COIN_ETH, verifier.derive(metaWithoutFlag(), VD), VD)
+                    resolver.resolve,
+                    (
+                        dns("alice.fkey.eth"),
+                        abi.encodeCall(
+                            IStealthResolver.verifyStealthResolution,
+                            (aliceNode, COIN_ETH, verifier.derive(metaWithoutFlag(), VD), VD)
+                        )
+                    )
                 )
             )
         );

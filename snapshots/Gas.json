@@ -4,9 +4,9 @@
   "resolveStealthCallback_verified_mockVerifier": "29100",
   "resolve_forwardedText_PermissionedResolver": "61211",
   "resolve_registeredAddr_offchainLookup": "23191",
+  "resolve_verifyStealthResolution_mockVerifier": "26778",
   "resolve_wildcardAddr_offchainLookup": "40792",
   "setChains_oneChain": "88931",
-  "setConfig_recordsResolver_oneUrl": "163076",
-  "setMetaAddress_67bytes": "178601",
-  "verifyStealthResolution_mockVerifier": "6991"
+  "setConfig_recordsResolver_oneUrl": "140884",
+  "setMetaAddress_67bytes": "156409"
 }
