@@ -135,6 +135,35 @@ after a re-registration until the new holder writes.
 A smart account can batch all five. For a wildcard username, the parent's holder calls
 `setMetaAddress` for the username's name; the parent's records resolver can be an offchain one.
 
+### Scheme 1
+
+`Scheme1Verifier` verifies ERC-5564 scheme 1 (secp256k1 with view tags) as the ScopeLift
+stealth-address SDK derives it: for meta-address `(P_spend, P_view)` and ephemeral private key `e`,
+
+```
+S   = e·P_view                         shared secret point (ECDH)
+s_h = keccak256(compressed S) mod n    33 bytes hashed: 0x02 or 0x03 prefix, then x
+stealth address = address(P_spend + s_h·G)
+```
+
+ERC-5564 leaves the hashed encoding open and implementations differ; the compressed point is what
+the SDK, and wallets built on it, use.
+
+The EVM has no secp256k1 arithmetic except `ecrecover`, which can compute `a·G + b·Q` but returns
+only the result's address. That covers the last step. Hashing `S` needs its coordinates, so the
+gateway sends `S` and the verifier checks that its address is that of `e·P_view`; a different `S`
+with the same address is a 160-bit second preimage of keccak256. Two `ecrecover` calls, no curve
+library. Scheme 1's `verificationData` is therefore 96 bytes, `e || S.x || S.y`, where the ENSIP
+draft's Section 4 has the 32-byte `e` alone; this is raised against the ENSIP, and a gateway
+computes `S` anyway.
+
+The meta-address must be two compressed keys whose x-coordinates are below the group order `n`;
+anything else, including the one in about 2^128 valid keys at or above `n` that `ecrecover` cannot
+take, is malformed and fails the resolution. With no meta-address the verifier returns the
+gateway's address unchecked: unverified mode trusts the gateway and, for batched lookups, the batch
+gateway. A verifier must be as immutable as the resolver, since it decides the derived address:
+`Scheme1Verifier` has no state and no owner.
+
 ## Contracts
 
 | Contract | Role |
@@ -142,6 +171,7 @@ A smart account can batch all five. For a wildcard username, the parent's holder
 | `StealthResolver` | The verifying resolver |
 | `interfaces/IStealthResolver` | ENSIP Section 5, verbatim |
 | `interfaces/IStealthVerifier` | Scheme-specific verification, one verifier per scheme |
+| `verifiers/Scheme1Verifier` | ERC-5564 scheme 1 (see Scheme 1) |
 
 ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCoder`, `ENSIP19`
 (ens-contracts); `LibRegistry`, `RegistryRolesLib` and the registry interfaces (namechain).
@@ -151,9 +181,11 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
 | `StealthResolver` | 20,600 | 3,976 |
+| `Scheme1Verifier` | 1,627 | 22,949 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
-`eth_call` costs; verified-mode numbers use a mock verifier and exclude the scheme's curve arithmetic.
+`eth_call` costs; verified-mode numbers use a mock verifier, and the verifier's own cost is listed
+separately.
 Every `resolve()` looks the name up in the registry to find its authority, which is most of the
 read cost.
 
@@ -164,6 +196,7 @@ read cost.
 | `resolveStealthCallback`, unverified (wildcard name) | 43,675 + verifier |
 | `resolveStealthCallback`, verified (registered name) | 29,100 + verifier |
 | `resolve` registered name, `verifyStealthResolution` | 26,828 + verifier |
+| `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,084 |
 | `resolve` text, forwarded to a `PermissionedResolver` | 61,253 |
 | `text` on the `PermissionedResolver` directly (reference) | 3,261 |
 | `setConfig`, records resolver and one URL (transaction) | 140,884 |
@@ -188,6 +221,14 @@ UniversalResolverV2. A fork test runs against ENS's ENSv2 deployment on Sepolia 
 
 ```bash
 SEPOLIA_RPC_URL=<rpc> forge test --match-path "test/fork/*"
+```
+
+The scheme 1 test vectors in `test/utils/Scheme1Vectors.sol` are derivations by the ScopeLift SDK,
+each also rederived from the curve operations by the generator. To regenerate them:
+
+```bash
+npm install --prefix <dir> --ignore-scripts @scopelift/stealth-address-sdk@1.0.0-beta.5
+node script/vectors/scheme1.mjs <dir> > test/utils/Scheme1Vectors.sol && forge fmt
 ```
 
 Running a subset of tests rewrites `snapshots/` without the gas file; run the full suite before
@@ -218,11 +259,19 @@ and an `mcopy` variant of ens-contracts' `LibMem`) do not take effect under Foun
 
 ## Deployment
 
-`script/Deploy.s.sol` deploys through the canonical CREATE2 deployer
+`script/DeployScheme1Verifier.s.sol` deploys `Scheme1Verifier` through the canonical CREATE2
+deployer with salt `keccak256("ENSIP-30 Scheme1Verifier")`. It has no constructor arguments, so it
+has one address on every chain, and the script does nothing if it is already there:
+
+```bash
+forge script script/DeployScheme1Verifier.s.sol --fork-url $RPC_URL
+```
+
+`script/Deploy.s.sol` then deploys `StealthResolver` through the canonical CREATE2 deployer
 (`0x4e59b44847b379578588920cA78FbF26c0B4956C`) with salt `keccak256("ENSIP-30 StealthResolver")`.
 The address depends only on the salt, the bytecode and the constructor arguments (ENSv2 root
-registry, verifier, batch gateway provider), so there is one resolver per verifier. Without
-`--broadcast` the script only simulates:
+registry, verifier, batch gateway provider), so there is one resolver per verifier; pass the
+verifier's printed address as `VERIFIER`. Without `--broadcast` either script only simulates:
 
 ```bash
 ROOT_REGISTRY=<a> VERIFIER=<a> BATCH_GATEWAY_PROVIDER=<a> forge script script/Deploy.s.sol --fork-url $RPC_URL

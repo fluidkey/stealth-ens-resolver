@@ -2,10 +2,21 @@
 pragma solidity 0.8.25;
 
 import {Deploy} from "../script/Deploy.s.sol";
+import {DeployScheme1Verifier} from "../script/DeployScheme1Verifier.s.sol";
 import {StealthResolver} from "../src/StealthResolver.sol";
+import {Scheme1Verifier} from "../src/verifiers/Scheme1Verifier.sol";
 import {StealthResolverFixture} from "./utils/StealthResolverFixture.sol";
 
 contract DeployTest is StealthResolverFixture {
+    /// @dev At the predicted address; a second run finds it and deploys nothing.
+    function test_deployScheme1Verifier_atPredictedAddress() public {
+        DeployScheme1Verifier script = new DeployScheme1Verifier();
+        Scheme1Verifier deployed = script.run();
+        assertEq(address(deployed), script.predict());
+        assertEq(deployed.schemeId(), 1);
+        assertEq(address(script.run()), address(deployed));
+    }
+
     function test_deploy_atPredictedAddress() public {
         vm.setEnv("ROOT_REGISTRY", vm.toString(address(rootRegistry)));
         vm.setEnv("VERIFIER", vm.toString(address(verifier)));
