@@ -210,14 +210,20 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         resolver.setChains(dns("bob.fkey.eth"), coinTypes, true);
     }
 
-    /// @dev A wildcard name uses its authority's list; a registered name only its own.
+    /// @dev True iff an address query goes to the gateway: listed by the authority and gateway
+    ///      URLs set. A wildcard name uses its authority's list; a registered name only its own.
     function test_isStealthChain() public {
         assertTrue(resolver.isStealthChain(dns("bob.fkey.eth"), COIN_ETH), "fkey.eth's list");
         assertFalse(resolver.isStealthChain(dns("bob.fkey.eth"), 10), "not listed");
         assertFalse(resolver.isStealthChain(dns("alice.fkey.eth"), COIN_ETH), "nothing inherited");
         setChain(alice, "alice.fkey.eth", COIN_BASE, true);
+        assertFalse(resolver.isStealthChain(dns("alice.fkey.eth"), COIN_BASE), "no gateway URLs");
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), STEALTH_GW);
         assertTrue(resolver.isStealthChain(dns("alice.fkey.eth"), COIN_BASE));
         assertTrue(resolver.isStealthChain(dns("x.alice.fkey.eth"), COIN_BASE), "below alice");
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
+        assertFalse(resolver.isStealthChain(dns("alice.fkey.eth"), COIN_BASE), "URLs cleared");
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), STEALTH_GW);
         setChain(alice, "alice.fkey.eth", COIN_BASE, false);
         assertFalse(resolver.isStealthChain(dns("alice.fkey.eth"), COIN_BASE), "removed");
     }

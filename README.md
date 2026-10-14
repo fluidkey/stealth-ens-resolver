@@ -47,6 +47,7 @@ registered ancestor. Nothing is inherited past a registered name.
 | `gatewayURLs(node)` | N's authority's URLs. Through `resolve()` only: called directly it reverts `ResolveOnly` (see Section 5 by name). |
 | `verifyStealthResolution(node, coinType, address, verificationData)` | Verified against N's record, located by name like every other query, wildcard names included. Through `resolve()` only, as above; no CCIP-Read is involved, so contracts can call it onchain. |
 | `getResolver(name)` (`ICompositeResolver`) | The records resolver, so apps know where to edit other records. |
+| `isStealthChain(name, coinType)` (view, not through `resolve()`) | Whether an address query for that coin type goes to the gateway: on the authority's chain list and gateway URLs set. Verified or not is told by the record. |
 
 **The record served is the record verified**, for every name, wildcard names included. Only the
 scheme's key in canonical form is the record; other spellings (`[060]`, `[0x3c]`) are ordinary data,
@@ -148,7 +149,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 20,547 | 4,029 |
+| `StealthResolver` | 20,512 | 4,064 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
 `eth_call` costs; verified-mode numbers use a mock verifier and exclude the scheme's curve arithmetic.
