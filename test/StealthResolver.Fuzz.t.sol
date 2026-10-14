@@ -30,14 +30,16 @@ contract StealthResolverFuzzTest is StealthResolverFixture {
         harness = new StealthResolverHarness(rootRegistry, verifier, batchGatewayProvider);
     }
 
-    /// @dev Every coin type's canonical key is the record, through `resolve()`.
-    function testFuzz_recordServedForEveryCoinType(uint256 coinType) public {
-        setRecord(alice, "alice.fkey.eth", coinType, META);
+    /// @dev Every coin type's canonical key is the record through `resolve()`: the meta-address
+    ///      for the listed chain, empty for every other.
+    function testFuzz_recordServedOnlyForListedChain(uint256 coinType) public {
+        setChain(alice, "alice.fkey.eth", COIN_BASE, true);
+        setMeta(alice, "alice.fkey.eth", META);
         bytes memory v = resolver.resolve(
             dns("alice.fkey.eth"),
             abi.encodeCall(IDataResolver.data, (aliceNode, stealthKey(coinType)))
         );
-        assertEq(abi.decode(v, (bytes)), META);
+        assertEq(abi.decode(v, (bytes)), coinType == COIN_BASE ? META : bytes(""));
     }
 
     /// @dev Only canonical keys parse: anything after the prefix that parses is the canonical key
@@ -66,6 +68,6 @@ contract StealthResolverFuzzTest is StealthResolverFixture {
         if (!wellFormed) {
             vm.expectRevert(abi.encodeWithSelector(StealthResolver.MalformedRecord.selector, value));
         }
-        resolver.setStealthRecord(dns("alice.fkey.eth"), COIN_ETH, value);
+        resolver.setMetaAddress(dns("alice.fkey.eth"), value);
     }
 }

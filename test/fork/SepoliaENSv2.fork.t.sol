@@ -92,7 +92,10 @@ contract SepoliaENSv2ForkTest is CCIPClient {
         vm.startPrank(alice);
         records.setText(nameNode, "url", "https://alice.example");
         resolver.setConfig(name, address(records), _urls());
-        resolver.setStealthRecord(name, 60, TEST_META);
+        uint256[] memory chains = new uint256[](1);
+        chains[0] = 60;
+        resolver.setChains(name, chains, true);
+        resolver.setMetaAddress(name, TEST_META);
         vm.stopPrank();
     }
 

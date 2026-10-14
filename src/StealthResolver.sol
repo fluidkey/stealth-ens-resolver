@@ -30,10 +30,11 @@ import {IStealthVerifier} from "./interfaces/IStealthVerifier.sol";
 
 /// @title StealthResolver
 /// @notice ENSIP-30 (Stealth Address Resolution) verifying resolver for the ENSv2 registry.
-/// @dev Stores the ENSIP-30 Section 1 stealth meta-address record and, per registered name, a
-///      config: a records resolver (an unmodified ENS resolver chosen by the name's owner, such as
-///      its own `PermissionedResolver`, `PublicResolverV2` or an offchain resolver) and gateway
-///      URLs. Every other record is forwarded to the records resolver through ENS's
+/// @dev Stores one stealth meta-address per name (the ENSIP-30 Section 1 record value) and, per
+///      registered name, a config: a records resolver (an unmodified ENS resolver chosen by the
+///      name's owner, such as its own `PermissionedResolver`, `PublicResolverV2` or an offchain
+///      resolver), gateway URLs, and a chain list (the EVM coin types on which the name is
+///      stealth). Every other record is forwarded to the records resolver through ENS's
 ///      `ResolverCaller`, as ENS's mirror resolvers do.
 ///
 ///      Queried only through ENSIP-10 `resolve()`; no profile is answered directly.
@@ -47,12 +48,13 @@ import {IStealthVerifier} from "./interfaces/IStealthVerifier.sol";
 ///
 ///      Per query for a DNS-encoded name N, with the config of N's authority (nothing is inherited
 ///      past a registered name, so an ancestor never governs a registered descendant):
-///      - EVM address record, gateway URLs non-empty: `OffchainLookup` to them; the
-///        callback verifies if the stealth record for the coin type is stored, otherwise the
-///        verifier decides (unverified mode). Non-EVM address records are forwarded: the verifier
-///        answers with an EVM address.
-///      - ENSIP-30 Section 1 record of this resolver's scheme: answered from storage, the same
-///        value the callback verifies against.
+///      - Address record for a coin type on the chain list, gateway URLs non-empty:
+///        `OffchainLookup` to them; the callback verifies if N has a meta-address, otherwise the
+///        verifier decides (unverified mode).
+///      - Address record for any other coin type: forwarded to the records resolver, so a name can
+///        be stealth on some chains and keep a static address on others.
+///      - ENSIP-30 Section 1 record of this resolver's scheme: N's meta-address if the coin type
+///        is on the chain list, otherwise empty; the same value the callback verifies against.
 ///      - Anything else: forwarded to the records resolver.
 contract StealthResolver is
     ERC165,
@@ -98,15 +100,18 @@ contract StealthResolver is
     /// @dev Config of a registered name, by its authority key.
     mapping(bytes32 key => Config) private _configs;
 
-    /// @dev Stealth meta-address records, by the authority key of the nearest registered name at
-    ///      or above `node`.
-    mapping(bytes32 key => mapping(bytes32 node => mapping(uint256 coinType => bytes))) private
-        _records;
+    /// @dev Chain list of a registered name, by its authority key: the EVM coin types on which the
+    ///      name and the unregistered names below it are stealth.
+    mapping(bytes32 key => mapping(uint256 coinType => bool)) private _chains;
 
-    /// @dev Authority key of the last `setConfig` / `setStealthRecord` for `node`, for the
+    /// @dev Meta-address records (flag byte and the scheme's meta-address), by the authority key of
+    ///      the nearest registered name at or above `node`.
+    mapping(bytes32 key => mapping(bytes32 node => bytes)) private _metaAddresses;
+
+    /// @dev Authority key of the last `setConfig` / `setMetaAddress` for `node`, for the
     ///      node-based ENSIP-30 Section 5 functions only.
     mapping(bytes32 node => bytes32 key) private _configKeys;
-    mapping(bytes32 node => bytes32 key) private _recordKeys;
+    mapping(bytes32 node => bytes32 key) private _metaAddressKeys;
 
     ////////////////////////////////////////////////////////////////////////
     // Events and errors
@@ -115,16 +120,24 @@ contract StealthResolver is
     /// @notice The config of `node` changed.
     event ConfigChanged(bytes32 indexed node, bytes name, address recordsResolver, string[] urls);
 
-    /// @notice The ENSIP-30 Section 1 record of `node` for `coinType` changed.
-    event StealthRecordChanged(
-        bytes32 indexed node, bytes name, uint256 indexed coinType, bytes value
-    );
+    /// @notice `coinType` was added to or removed from the chain list of `node`.
+    event ChainChanged(bytes32 indexed node, bytes name, uint256 indexed coinType, bool enabled);
+
+    /// @notice The meta-address record of `node` changed.
+    event MetaAddressChanged(bytes32 indexed node, bytes name, bytes value);
 
     /// @notice `account` may not write this state of `name`.
     error Unauthorized(bytes name, address account);
 
     /// @notice A records resolver must be a contract other than this resolver.
     error InvalidRecordsResolver(address recordsResolver);
+
+    /// @notice Only EVM coin types can be on a chain list: the verifier answers with an EVM address.
+    error InvalidChain(uint256 coinType);
+
+    /// @notice `coinType` is no longer on the chain list or the gateway was removed: the gateway's
+    ///         answer for it is not accepted.
+    error ChainNotStealth(uint256 coinType);
 
     /// @notice The node in the resolver calldata is not the namehash of the DNS-encoded name.
     error NodeMismatch(bytes32 node, bytes32 nameNode);
@@ -203,17 +216,37 @@ contract StealthResolver is
         emit ConfigChanged(node, name, recordsResolver, urls);
     }
 
-    /// @notice Sets the ENSIP-30 Section 1 stealth meta-address record of `name` for `coinType`.
-    /// @dev ENSIP-30 Section 1. Allowed for whoever may set the resolver of the nearest registered
-    ///      name at or above `name` (see `canSetStealthRecord`): the name itself if registered,
-    ///      otherwise its nearest registered ancestor (wildcard names). A record written by an
-    ///      ancestor is no longer read once the name is registered.
+    /// @notice Adds or removes EVM coin types on the chain list of the registered name `name`.
+    /// @dev ENSIP-30 Sections 1 and 4. The list says on which chains `name` and the unregistered
+    ///      (wildcard) names below it are stealth: an address query for a listed coin type goes to
+    ///      the gateway, verified if the name has a meta-address; any other coin type is forwarded
+    ///      to the records resolver. `data()` serves the meta-address record only for listed coin
+    ///      types. Same authority as `setConfig`.
     /// @param name The DNS-encoded name.
-    /// @param coinType The ENSIP-9 coin type.
+    /// @param coinTypes ENSIP-11 EVM coin types.
+    /// @param enabled Add (true) or remove (false).
+    function setChains(bytes calldata name, uint256[] calldata coinTypes, bool enabled) external {
+        NameState memory ctx = _context(name);
+        if (!ctx.exact || !_isAuthority(ctx, msg.sender)) revert Unauthorized(name, msg.sender);
+        bytes32 node = NameCoder.namehash(name, 0);
+        for (uint256 i; i < coinTypes.length; ++i) {
+            uint256 coinType = coinTypes[i];
+            if (!ENSIP19.isEVMCoinType(coinType)) revert InvalidChain(coinType);
+            _chains[ctx.key][coinType] = enabled;
+            emit ChainChanged(node, name, coinType, enabled);
+        }
+    }
+
+    /// @notice Sets the stealth meta-address record of `name`, served for every coin type on its
+    ///         authority's chain list.
+    /// @dev ENSIP-30 Section 1: one value stored, exposed under each enabled coin type. Allowed for
+    ///      whoever may set the resolver of the nearest registered name at or above `name` (see
+    ///      `canSetMetaAddress`): the name itself if registered, otherwise its nearest registered
+    ///      ancestor (wildcard names). A record written by an ancestor is no longer read once the
+    ///      name is registered.
+    /// @param name The DNS-encoded name.
     /// @param value Flag byte (reserved bits zero) and the scheme's meta-address, or empty to clear.
-    function setStealthRecord(bytes calldata name, uint256 coinType, bytes calldata value)
-        external
-    {
+    function setMetaAddress(bytes calldata name, bytes calldata value) external {
         NameState memory ctx = _context(name);
         if (!_isAuthority(ctx, msg.sender)) revert Unauthorized(name, msg.sender);
         // A flag byte with reserved bits zero, then a non-empty meta-address: a flag-only record
@@ -222,9 +255,9 @@ contract StealthResolver is
             revert MalformedRecord(value);
         }
         bytes32 node = NameCoder.namehash(name, 0);
-        _records[ctx.key][node][coinType] = value;
-        _recordKeys[node] = ctx.key;
-        emit StealthRecordChanged(node, name, coinType, value);
+        _metaAddresses[ctx.key][node] = value;
+        _metaAddressKeys[node] = ctx.key;
+        emit MetaAddressChanged(node, name, value);
     }
 
     /// @notice Whether `account` may set the config of `name`: `name` is registered in an ENSv2
@@ -239,16 +272,12 @@ contract StealthResolver is
         return ctx.exact && _isAuthority(ctx, account);
     }
 
-    /// @notice Whether `account` may set the stealth records of `name`: as `canSetConfig`, for the
+    /// @notice Whether `account` may set the meta-address of `name`: as `canSetConfig`, for the
     ///         nearest registered name at or above `name`.
     /// @dev ENSIP-30 Sections 1 and 5: write authorization follows the rules for the name's resolver.
     /// @param name The DNS-encoded name.
     /// @param account The account to check.
-    function canSetStealthRecord(bytes calldata name, address account)
-        external
-        view
-        returns (bool)
-    {
+    function canSetMetaAddress(bytes calldata name, address account) external view returns (bool) {
         return _isAuthority(_context(name), account);
     }
 
@@ -263,6 +292,14 @@ contract StealthResolver is
         if (!ctx.exact) return (address(0), urls);
         Config storage c = _configs[ctx.key];
         return (c.recordsResolver, c.gatewayURLs);
+    }
+
+    /// @notice Whether `name` is stealth on `coinType`: the coin type is on the chain list of its
+    ///         authority (the name itself if registered, otherwise its nearest registered ancestor).
+    /// @dev ENSIP-30 Section 2: with non-empty gateway URLs, the coin types that resolve through
+    ///      the gateway.
+    function isStealthChain(bytes calldata name, uint256 coinType) external view returns (bool) {
+        return _chains[_context(name).key][coinType];
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -286,17 +323,17 @@ contract StealthResolver is
     }
 
     /// @inheritdoc IStealthResolver
-    /// @dev ENSIP-30 Section 5. The record last written for `node`, wildcard names included. A
-    ///      node cannot be walked through the registry, so after a re-registration this verifies
-    ///      against the previous holder's record until the new holder writes; `resolve()` and the
-    ///      callback never do.
+    /// @dev ENSIP-30 Section 5. The meta-address last written for `node`, wildcard names included,
+    ///      if `coinType` is on the chain list of its writer. A node cannot be walked through the
+    ///      registry, so after a re-registration this verifies against the previous holder's record
+    ///      until the new holder writes; `resolve()` and the callback never do.
     function verifyStealthResolution(
         bytes32 node,
         uint256 coinType,
         address stealthAddress,
         bytes calldata verificationData
     ) external view returns (address) {
-        bytes memory record = _records[_recordKeys[node]][node][coinType];
+        bytes memory record = _record(_metaAddressKeys[node], node, coinType);
         if (record.length == 0) revert NoStealthRecord(node, coinType);
         return _verify(node, coinType, record, verificationData, stealthAddress);
     }
@@ -326,8 +363,9 @@ contract StealthResolver is
     }
 
     /// @notice ERC-3668 callback for address records.
-    /// @dev ENSIP-30 Section 4, step 3: verified if the stealth record of `name` for `coinType` is
-    ///      stored, read here; otherwise the verifier decides. The zero address is an unset record.
+    /// @dev ENSIP-30 Section 4, step 3: verified if `name` has a meta-address, read here; otherwise
+    ///      the verifier decides. Reverts if the coin type is no longer stealth for `name` (chain
+    ///      removed or gateway cleared since the lookup). The zero address is an unset record.
     /// @param response `abi.encode(address stealthAddress, bytes verificationData)` from the gateway.
     /// @param extraData `abi.encode(name, coinType, legacy)`; `legacy` = `addr(bytes32)` was queried.
     /// @return The ABI-encoded result of the queried address profile.
@@ -340,7 +378,9 @@ contract StealthResolver is
             abi.decode(extraData, (bytes, uint256, bool));
         (address claimed, bytes memory verificationData) = abi.decode(response, (address, bytes));
         bytes32 node = NameCoder.namehash(name, 0);
-        bytes memory record = _records[_context(name).key][node][coinType];
+        bytes32 key = _context(name).key;
+        if (!_isStealth(key, coinType)) revert ChainNotStealth(coinType);
+        bytes memory record = _metaAddresses[key][node];
         address resolved = record.length == 0
             ? VERIFIER.verify(node, coinType, "", verificationData, claimed)
             : _verify(node, coinType, record, verificationData, claimed);
@@ -383,13 +423,13 @@ contract StealthResolver is
             (, string memory key) = abi.decode(data[4:], (bytes32, string));
             (bool isStealthKey, uint256 keyCoinType) = _parseStealthKey(key);
             if (isStealthKey) {
-                return abi.encode(_records[ctx.key][_checkNode(name, data)][keyCoinType]);
+                return abi.encode(_record(ctx.key, _checkNode(name, data), keyCoinType));
             }
         }
         bool legacy = selector == IAddrResolver.addr.selector;
         bool isAddr = legacy || selector == IAddressResolver.addr.selector;
         uint256 coinType = isAddr && !legacy ? uint256(bytes32(data[36:68])) : COIN_TYPE_ETH;
-        if (isAddr && c.gatewayURLs.length > 0 && ENSIP19.isEVMCoinType(coinType)) {
+        if (isAddr && _isStealth(ctx.key, coinType)) {
             _checkNode(name, data);
             revert OffchainLookup(
                 address(this),
@@ -469,6 +509,22 @@ contract StealthResolver is
         uint256 status;
         (status,,,, resource) = abi.decode(v, (uint256, uint256, uint256, uint256, uint256));
         registered = status == uint256(IPermissionedRegistry.Status.REGISTERED);
+    }
+
+    /// @dev Whether address queries for `coinType` go to the gateway under the authority `key`:
+    ///      on its chain list, gateway URLs set. Chain lists hold EVM coin types only.
+    function _isStealth(bytes32 key, uint256 coinType) internal view returns (bool) {
+        return _chains[key][coinType] && _configs[key].gatewayURLs.length > 0;
+    }
+
+    /// @dev The ENSIP-30 Section 1 record of `node` for `coinType` under the authority `key`: its
+    ///      meta-address if `coinType` is on the chain list, otherwise empty.
+    function _record(bytes32 key, bytes32 node, uint256 coinType)
+        internal
+        view
+        returns (bytes memory)
+    {
+        return _chains[key][coinType] ? _metaAddresses[key][node] : bytes("");
     }
 
     /// @dev Whether `account` holds `ROLE_SET_RESOLVER` on the authority of `ctx`.

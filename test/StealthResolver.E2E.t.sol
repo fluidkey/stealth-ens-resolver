@@ -97,7 +97,7 @@ contract StealthResolverE2ETest is StealthResolverFixture {
     ///      Fluidkey published for it onchain; the record reads the same through the UR.
     function test_ur_wildcardUsername_verified() public {
         string memory key = stealthKey(COIN_ETH);
-        setRecord(fluidkey, "bob.fkey.eth", COIN_ETH, META);
+        setMeta(fluidkey, "bob.fkey.eth", META);
 
         (bool ok, bytes memory result) =
             _ur("bob.fkey.eth", abi.encodeCall(IDataResolver.data, (bobNode, key)));
@@ -148,7 +148,7 @@ contract StealthResolverE2ETest is StealthResolverFixture {
         MockOffchainRecords offchain = new MockOffchainRecords();
         vm.prank(fluidkey);
         resolver.setConfig(dns("fkey.eth"), address(offchain), urls(STEALTH_GW));
-        setRecord(fluidkey, "bob.fkey.eth", COIN_ETH, META);
+        setMeta(fluidkey, "bob.fkey.eth", META);
 
         recordsAnswer = abi.encode("ipfs://from-gateway");
         (bool ok, bytes memory result) =

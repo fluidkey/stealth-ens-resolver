@@ -59,8 +59,9 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
         assertEq(r, address(0), "alice's config not read");
 
         setConfig(carol, "alice.fkey.eth", address(0), STEALTH_GW);
+        setChain(carol, "alice.fkey.eth", COIN_ETH, true);
         assertTrue(_unverified("alice.fkey.eth"), "alice's record not verified against");
-        setRecord(carol, "alice.fkey.eth", COIN_ETH, META);
+        setMeta(carol, "alice.fkey.eth", META);
         assertEq(_record("alice.fkey.eth"), META);
         assertFalse(_unverified("alice.fkey.eth"), "carol's record verifies");
     }
@@ -76,13 +77,14 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
     ///      previous holder's state until the new holder writes.
     function test_reregistration_nodeFunctionsLag() public {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "https://alice.gw");
-        setRecord(alice, "alice.fkey.eth", COIN_ETH, META);
+        setChain(alice, "alice.fkey.eth", COIN_ETH, true);
+        setMeta(alice, "alice.fkey.eth", META);
         address derived = verifier.derive(metaWithoutFlag(), VD);
         _reregisterAlice(carol);
         assertEq(resolver.verifyStealthResolution(aliceNode, COIN_ETH, derived, VD), derived);
         assertEq(resolver.gatewayURLs(aliceNode)[0], "https://alice.gw");
 
-        setRecord(carol, "alice.fkey.eth", COIN_ETH, "");
+        setMeta(carol, "alice.fkey.eth", "");
         setConfig(carol, "alice.fkey.eth", address(0), "");
         vm.expectRevert(
             abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, aliceNode, COIN_ETH)
@@ -94,7 +96,7 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
     /// @dev Re-registering the parent drops everything written under its authority: config and
     ///      every wildcard username's record.
     function test_parentReregistration_dropsUsernames() public {
-        setRecord(fluidkey, "bob.fkey.eth", COIN_ETH, META);
+        setMeta(fluidkey, "bob.fkey.eth", META);
         vm.warp(expiry);
         ethRegistry.register(
             "fkey", carol, fkeyRegistry, address(resolver), _ethTokenRoles(), expiry + 365 days
@@ -102,8 +104,8 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
         assertEq(_record("bob.fkey.eth").length, 0, "bob's record not served");
         (address r,) = resolver.getResolver(dns("bob.fkey.eth"));
         assertEq(r, address(0), "fkey.eth's config not read");
-        assertTrue(resolver.canSetStealthRecord(dns("bob.fkey.eth"), carol), "new holder writes");
-        assertFalse(resolver.canSetStealthRecord(dns("bob.fkey.eth"), fluidkey));
+        assertTrue(resolver.canSetMetaAddress(dns("bob.fkey.eth"), carol), "new holder writes");
+        assertFalse(resolver.canSetMetaAddress(dns("bob.fkey.eth"), fluidkey));
     }
 
     /// @dev An expired name that is not registered again is a wildcard name of its parent, as
@@ -116,8 +118,8 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
         assertEq(_record("alice.fkey.eth").length, 0, "alice's record not served");
         (address r,) = resolver.getResolver(dns("alice.fkey.eth"));
         assertEq(r, address(fkeyRecords));
-        assertTrue(resolver.canSetStealthRecord(dns("alice.fkey.eth"), fluidkey));
-        assertFalse(resolver.canSetStealthRecord(dns("alice.fkey.eth"), alice));
+        assertTrue(resolver.canSetMetaAddress(dns("alice.fkey.eth"), fluidkey));
+        assertFalse(resolver.canSetMetaAddress(dns("alice.fkey.eth"), alice));
     }
 
     /// @dev Role changes regenerate the token but keep the resource: state is kept.

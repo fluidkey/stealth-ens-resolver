@@ -1,11 +1,12 @@
 {
   "PermissionedResolver_text_direct_reference": "3261",
-  "resolveStealthCallback_unverified": "39578",
-  "resolveStealthCallback_verified_mockVerifier": "27907",
-  "resolve_forwardedText_PermissionedResolver": "61209",
-  "resolve_registeredAddr_offchainLookup": "22989",
-  "resolve_wildcardAddr_offchainLookup": "38590",
-  "setConfig_recordsResolver_oneUrl": "163120",
-  "setStealthRecord_67bytes": "179108",
-  "verifyStealthResolution_mockVerifier": "6650"
+  "resolveStealthCallback_unverified": "44027",
+  "resolveStealthCallback_verified_mockVerifier": "28355",
+  "resolve_forwardedText_PermissionedResolver": "61167",
+  "resolve_registeredAddr_offchainLookup": "23147",
+  "resolve_wildcardAddr_offchainLookup": "40748",
+  "setChains_oneChain": "88931",
+  "setConfig_recordsResolver_oneUrl": "163076",
+  "setMetaAddress_67bytes": "178601",
+  "verifyStealthResolution_mockVerifier": "6928"
 }

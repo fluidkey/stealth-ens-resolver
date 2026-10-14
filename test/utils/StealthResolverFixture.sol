@@ -78,6 +78,8 @@ abstract contract StealthResolverFixture is V1Fixture, V2Fixture, CCIPClient {
         fkeyRecords = deployRecords(fluidkey);
         aliceRecords = deployRecords(alice);
         setConfig(fluidkey, "fkey.eth", address(fkeyRecords), STEALTH_GW);
+        setChain(fluidkey, "fkey.eth", COIN_ETH, true);
+        setChain(fluidkey, "fkey.eth", COIN_BASE, true);
     }
 
     // Names and config.
@@ -126,18 +128,26 @@ abstract contract StealthResolverFixture is V1Fixture, V2Fixture, CCIPClient {
         );
     }
 
-    function setRecord(address caller, string memory name, uint256 coinType, bytes memory value)
+    function setMeta(address caller, string memory name, bytes memory value) internal {
+        vm.prank(caller);
+        resolver.setMetaAddress(dns(name), value);
+    }
+
+    function setChain(address caller, string memory name, uint256 coinType, bool enabled)
         internal
     {
+        uint256[] memory coinTypes = new uint256[](1);
+        coinTypes[0] = coinType;
         vm.prank(caller);
-        resolver.setStealthRecord(dns(name), coinType, value);
+        resolver.setChains(dns(name), coinTypes, enabled);
     }
 
     /// @dev Alice's config pointing at her own records resolver and Fluidkey's gateway (a
-    ///      registered name inherits nothing), and her stealth record.
+    ///      registered name inherits nothing), `coinType` on her chain list, and her meta-address.
     function setUpAliceVerified(uint256 coinType) internal {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), STEALTH_GW);
-        setRecord(alice, "alice.fkey.eth", coinType, META);
+        setChain(alice, "alice.fkey.eth", coinType, true);
+        setMeta(alice, "alice.fkey.eth", META);
     }
 
     function metaWithoutFlag() internal pure returns (bytes memory) {

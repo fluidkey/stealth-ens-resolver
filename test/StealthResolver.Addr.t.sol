@@ -5,6 +5,7 @@ import {EIP3668} from "@ens/contracts/ccipRead/EIP3668.sol";
 import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol";
 import {IAddressResolver} from "@ens/contracts/resolvers/profiles/IAddressResolver.sol";
 import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol";
+import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol";
 import {IExtendedResolver} from "@ens/contracts/resolvers/profiles/IExtendedResolver.sol";
 import {IRegistry} from "~src/registry/interfaces/IRegistry.sol";
 import {RegistryRolesLib} from "~src/registry/libraries/RegistryRolesLib.sol";
@@ -41,6 +42,13 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         );
     }
 
+    function _data(bytes32 n, uint256 coinType) internal view returns (bytes memory) {
+        bytes memory v = resolver.resolve(
+            dns("alice.fkey.eth"), abi.encodeCall(IDataResolver.data, (n, stealthKey(coinType)))
+        );
+        return abi.decode(v, (bytes));
+    }
+
     function _resolved(bytes memory v) internal pure returns (address) {
         return abi.decode(abi.decode(v, (bytes)), (address));
     }
@@ -69,6 +77,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
 
     function test_ownGatewayWinsOverInherited() public {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "https://alice.gw");
+        setChain(alice, "alice.fkey.eth", COIN_ETH, true);
         assertEq(_lookup("alice.fkey.eth").urls[0], "https://alice.gw");
     }
 
@@ -128,27 +137,88 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         );
     }
 
-    function test_verified_perCoinType() public {
+    // Chain lists (static on unlisted chains).
+
+    /// @dev Only listed chains are stealth: Base is not on alice's list, so her static Base
+    ///      address is forwarded, while Ethereum goes to the gateway and verifies.
+    function test_unlistedChain_staticAddressForwarded() public {
         setUpAliceVerified(COIN_ETH);
-        address any = makeAddr("any");
-        (bool ok, bytes memory v) =
-            callback(_lookupCoin("alice.fkey.eth", COIN_BASE), abi.encode(any, VD));
-        assertTrue(ok, "no record for Base: unverified");
-        assertEq(abi.decode(abi.decode(v, (bytes)), (bytes)), abi.encodePacked(any));
+        bytes memory baseStatic = abi.encodePacked(makeAddr("aliceBase"));
+        vm.prank(alice);
+        aliceRecords.setAddr(aliceNode, COIN_BASE, baseStatic);
+        bytes memory v = resolver.resolve(
+            dns("alice.fkey.eth"), abi.encodeCall(IAddressResolver.addr, (aliceNode, COIN_BASE))
+        );
+        assertEq(abi.decode(v, (bytes)), baseStatic, "Base: static");
+        assertEq(_lookup("alice.fkey.eth").urls[0], STEALTH_GW, "Ethereum: gateway");
+    }
+
+    /// @dev A listed chain is stealth even if a static address is set for it.
+    function test_listedChain_stealthWinsOverStatic() public {
+        setUpAliceVerified(COIN_ETH);
+        vm.prank(alice);
+        aliceRecords.setAddr(aliceNode, makeAddr("aliceStatic"));
+        (bool ok, bytes memory v) = callback(_lookup("alice.fkey.eth"), abi.encode(_derived(), VD));
+        assertTrue(ok);
+        assertEq(_resolved(v), _derived());
+    }
+
+    /// @dev Removing a chain falls back to the static address, never to unverified mode.
+    function test_removedChain_fallsBackToStatic() public {
+        setUpAliceVerified(COIN_ETH);
+        address aliceStatic = makeAddr("aliceStatic");
+        vm.prank(alice);
+        aliceRecords.setAddr(aliceNode, aliceStatic);
+        setChain(alice, "alice.fkey.eth", COIN_ETH, false);
+        bytes memory v =
+            resolver.resolve(dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode)));
+        assertEq(abi.decode(v, (address)), aliceStatic);
+    }
+
+    /// @dev A chain removed between lookup and callback: the gateway's answer is not accepted,
+    ///      verified or not.
+    function test_chainRemovedBetweenLookupAndCallback() public {
+        EIP3668.Params memory p = _lookup("bob.fkey.eth");
+        setChain(fluidkey, "fkey.eth", COIN_ETH, false);
+        (bool ok, bytes memory v) = callback(p, abi.encode(makeAddr("any"), VD));
+        assertFalse(ok);
+        assertEq(v, abi.encodeWithSelector(StealthResolver.ChainNotStealth.selector, COIN_ETH));
+    }
+
+    /// @dev Gateway URLs cleared between lookup and callback: the same.
+    function test_gatewayRemovedBetweenLookupAndCallback() public {
+        EIP3668.Params memory p = _lookup("bob.fkey.eth");
+        setConfig(fluidkey, "fkey.eth", address(fkeyRecords), "");
+        (bool ok, bytes memory v) = callback(p, abi.encode(makeAddr("any"), VD));
+        assertFalse(ok);
+        assertEq(v, abi.encodeWithSelector(StealthResolver.ChainNotStealth.selector, COIN_ETH));
+    }
+
+    /// @dev The record is served only for listed chains.
+    function test_recordServedOnlyForListedChains() public {
+        setUpAliceVerified(COIN_ETH);
+        assertEq(_data(aliceNode, COIN_ETH), META);
+        assertEq(_data(aliceNode, COIN_BASE).length, 0);
+        address derived = _derived();
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, aliceNode, COIN_BASE)
+        );
+        resolver.verifyStealthResolution(aliceNode, COIN_BASE, derived, VD);
     }
 
     function test_verified_recordRemovedBetweenLookupAndCallback() public {
         setUpAliceVerified(COIN_ETH);
         EIP3668.Params memory p = _lookup("alice.fkey.eth");
-        setRecord(alice, "alice.fkey.eth", COIN_ETH, "");
+        setMeta(alice, "alice.fkey.eth", "");
         (bool ok,) = callback(p, abi.encode(makeAddr("any"), VD));
         assertTrue(ok, "record read at callback time");
     }
 
     function test_verified_recordAddedBetweenLookupAndCallback() public {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), STEALTH_GW);
+        setChain(alice, "alice.fkey.eth", COIN_ETH, true);
         EIP3668.Params memory p = _lookup("alice.fkey.eth");
-        setRecord(alice, "alice.fkey.eth", COIN_ETH, META);
+        setMeta(alice, "alice.fkey.eth", META);
         (bool ok,) = callback(p, abi.encode(makeAddr("attacker"), VD));
         assertFalse(ok, "record read at callback time");
     }
@@ -207,7 +277,8 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         assertEq(abi.decode(v, (bytes)), btc, "static Bitcoin address, no lookup");
     }
 
-    function test_defaultEvmCoinType_goesToGateway() public view {
+    function test_defaultEvmCoinType_goesToGateway() public {
+        setChain(fluidkey, "fkey.eth", 1 << 31, true);
         EIP3668.Params memory p = _lookupCoin("bob.fkey.eth", 1 << 31);
         assertEq(p.urls[0], STEALTH_GW);
     }
@@ -215,7 +286,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
     // Wildcard names: the record is written by the nearest registered ancestor.
 
     function _setBobRecord() internal {
-        setRecord(fluidkey, "bob.fkey.eth", COIN_ETH, META);
+        setMeta(fluidkey, "bob.fkey.eth", META);
     }
 
     /// @dev Fluidkey writes the record of bob, a username that exists only in its gateway: a
@@ -252,7 +323,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
     /// @dev Registration takes authority: a record Fluidkey wrote for a username before it was
     ///      registered is not read once it is, and Fluidkey cannot write it afterwards.
     function test_registrationTakesAuthority() public {
-        setRecord(fluidkey, "carol.fkey.eth", COIN_ETH, META);
+        setMeta(fluidkey, "carol.fkey.eth", META);
         address carol = makeAddr("carol");
         vm.prank(fluidkey);
         fkeyRegistry.register(
@@ -264,6 +335,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
             expiry
         );
         setConfig(carol, "carol.fkey.eth", address(0), STEALTH_GW);
+        setChain(carol, "carol.fkey.eth", COIN_ETH, true);
         address any = makeAddr("any");
         (bool ok, bytes memory v) = callback(_lookup("carol.fkey.eth"), abi.encode(any, VD));
         assertTrue(ok);
@@ -275,13 +347,14 @@ contract StealthResolverAddrTest is StealthResolverFixture {
                 StealthResolver.Unauthorized.selector, dns("carol.fkey.eth"), fluidkey
             )
         );
-        resolver.setStealthRecord(dns("carol.fkey.eth"), COIN_ETH, META);
+        resolver.setMetaAddress(dns("carol.fkey.eth"), META);
     }
 
     /// @dev Two levels: sub.alice.fkey.eth is written by alice and takes fkey.eth's URLs.
     function test_wildcardRecord_twoLevels() public {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), STEALTH_GW);
-        setRecord(alice, "sub.alice.fkey.eth", COIN_ETH, META);
+        setChain(alice, "alice.fkey.eth", COIN_ETH, true);
+        setMeta(alice, "sub.alice.fkey.eth", META);
         EIP3668.Params memory p = _lookup("sub.alice.fkey.eth");
         assertEq(p.urls[0], STEALTH_GW);
         (bool ok,) = callback(p, abi.encode(makeAddr("attacker"), VD));
@@ -306,7 +379,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
     function _expectMalformed(bytes memory value) internal {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(StealthResolver.MalformedRecord.selector, value));
-        resolver.setStealthRecord(dns("alice.fkey.eth"), COIN_ETH, value);
+        resolver.setMetaAddress(dns("alice.fkey.eth"), value);
     }
 
     /// @dev Without this check the verifier would get an empty meta-address, i.e. unverified mode.
@@ -325,7 +398,8 @@ contract StealthResolverAddrTest is StealthResolverFixture {
     /// @dev Scheme-specific shape is the verifier's to check, when verifying (fail closed).
     function test_badLengthRejectedByVerifier() public {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), STEALTH_GW);
-        setRecord(alice, "alice.fkey.eth", COIN_ETH, hex"01aabb");
+        setChain(alice, "alice.fkey.eth", COIN_ETH, true);
+        setMeta(alice, "alice.fkey.eth", hex"01aabb");
         (bool ok, bytes memory v) =
             callback(_lookup("alice.fkey.eth"), abi.encode(makeAddr("any"), VD));
         assertFalse(ok);

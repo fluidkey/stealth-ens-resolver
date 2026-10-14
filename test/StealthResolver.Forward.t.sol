@@ -71,7 +71,7 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         MockOffchainRecords offchain = new MockOffchainRecords();
         vm.prank(fluidkey);
         resolver.setConfig(dns("fkey.eth"), address(offchain), urls(STEALTH_GW));
-        setRecord(fluidkey, "bob.fkey.eth", COIN_ETH, META);
+        setMeta(fluidkey, "bob.fkey.eth", META);
         assertEq(_data("bob.fkey.eth", stealthKey(COIN_ETH)), META);
         expectLookup(
             address(resolver),
@@ -104,10 +104,14 @@ contract StealthResolverForwardTest is StealthResolverFixture {
             assertEq(_data("alice.fkey.eth", others[i]), abi.encode(i), others[i]);
         }
 
-        setRecord(alice, "alice.fkey.eth", type(uint256).max, META);
+        // The canonical key of the largest coin type is parsed as the record, not forwarded: not
+        // an EVM chain, so never listed, so empty.
+        string memory largest = stealthKey(type(uint256).max); // external call: before vm.prank
+        vm.prank(alice);
+        aliceRecords.setData(aliceNode, largest, META);
         assertEq(
-            _data("alice.fkey.eth", stealthKey(type(uint256).max)),
-            META,
+            _data("alice.fkey.eth", stealthKey(type(uint256).max)).length,
+            0,
             "largest coin type is the record"
         );
     }

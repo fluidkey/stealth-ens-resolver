@@ -12,8 +12,9 @@ disagreement is raised against the ENSIP.
 
 ## Design
 
-`StealthResolver` stores one record per name and coin type, the ENSIP's stealth meta-address, and a
-small config per registered name. Every other record stays in an unmodified ENS resolver of the
+`StealthResolver` stores one stealth meta-address per name (the ENSIP's record value) and a small
+config per registered name: records resolver, gateway URLs and a **chain list**, the EVM coin types on
+which the name is stealth. Every other record stays in an unmodified ENS resolver of the
 owner's choice, its **records resolver**: the per-account `PermissionedResolver` ENSv2 gives new
 names, `PublicResolverV2` for names migrated from ENSv1, an offchain resolver, or any other ENS
 resolver. `StealthResolver` is the name's resolver in the ENSv2 registry and forwards those queries
@@ -21,12 +22,13 @@ through ENS's own `ResolverCaller`, as ENS's mirror resolvers do.
 
 ```
 ENSv2 registry ── resolver ──▶ StealthResolver (immutable, one per scheme)
-                                 │   stealth records; per registered name: records resolver, gateway URLs
-          EVM address, gateway ──┼──▶ OffchainLookup → gateway → callback
-                                 │       verified:   against the stored record
+                                 │   meta-addresses; per registered name: records resolver, gateway URLs, chain list
+  address on a listed chain ─────┼──▶ OffchainLookup → gateway → callback
+                                 │       verified:   against the stored meta-address
                                  │       unverified: the scheme's verifier decides
-          stealth record ────────┼──▶ answered from storage
-          everything else ───────┴──▶ forwarded unchanged to the records resolver
+  stealth record ────────────────┼──▶ answered from storage, for listed chains
+  everything else ───────────────┴──▶ forwarded unchanged to the records resolver
+  (incl. addresses on other chains)
 ```
 
 ### Resolution rules
@@ -37,10 +39,9 @@ registered ancestor. Nothing is inherited past a registered name.
 
 | Query | Result |
 |---|---|
-| EVM address record (`addr`, `addr(coinType)` for an EVM coin type), gateway URLs set | ERC-3668 lookup to the gateway. **Verified** if N has a stored record for the coin type: the verifier rederives the address and it must equal the gateway's. Otherwise **unverified**: the verifier decides. The zero address is an unset record. |
-| Non-EVM address record | Forwarded to the records resolver: the verifier answers with an EVM address. |
-| Address record, no gateway URLs | Forwarded to the records resolver; unset if there is none. |
-| `data(node, "stealth-meta-address[<scheme>][<coinType>]")` | Answered from storage: the value the callback verifies against. |
+| Address record (`addr`, `addr(coinType)`) for a coin type on the chain list, gateway URLs set | ERC-3668 lookup to the gateway. **Verified** if N has a meta-address: the verifier rederives the address and it must equal the gateway's. Otherwise **unverified**: the verifier decides. The zero address is an unset record. |
+| Address record for any other coin type, or no gateway URLs | Forwarded to the records resolver (the name's static address); unset if there is none. |
+| `data(node, "stealth-meta-address[<scheme>][<coinType>]")` | N's meta-address if the coin type is on the chain list, otherwise empty: the value the callback verifies against. |
 | Any other record | Forwarded to the records resolver, including offchain ones. |
 | `resolve(name, multicall(...))` | Answered as one batch (ERC-7996 `RESOLVE_MULTICALL`). |
 | `gatewayURLs(node)` | N's own URLs; through `resolve()`, its authority's. |
@@ -51,13 +52,22 @@ scheme's key in canonical form is the record; other spellings (`[060]`, `[0x3c]`
 forwarded. The stealth key written into the records resolver with standard tooling is not the record
 and is ignored.
 
+**Chain lists.** One meta-address serves every listed chain (the ENSIP's rationale allows storing the
+key material once and exposing it under each coin type enabled for the name). Only EVM coin types can
+be listed, since the verifier answers with an EVM address. A name is stealth on listed chains and
+keeps its static address on all others, so stealth on Base and static on Ethereum is one list entry.
+Removing a chain falls back to the static address, never to unverified resolution: a lookup in
+flight when the chain or the gateway is removed is rejected (`ChainNotStealth`). For Fluidkey, the
+list of `fkey.eth` covers every username: adding a chain is one transaction.
+
 Records are checked when written: empty (cleared), or a flag byte with reserved bits zero followed by
 a non-empty meta-address. The scheme's verifier checks the meta-address itself when verifying, and a
 malformed one fails the resolution.
 
 Only `addr`, `addr(coinType)` and `multicall` take the gateway path. Other selectors, such as
 `multicallWithNodeCheck` or `hasAddr`, are forwarded, so a static address left in the records
-resolver of a gateway-configured name is readable through them. Do not keep one there.
+resolver for a listed chain is readable through them (it is public onchain anyway). Do not keep one
+there; static addresses for unlisted chains are intended.
 
 **Batched lookups.** A single address lookup goes from the client to the stealth gateway. In
 `resolve(name, multicall(...))` every lookup is batched through ENS's batch gateway, as the
@@ -78,15 +88,16 @@ authority: their state would reach every name below them. A name in a registry t
 | Function | Name | Written by |
 |---|---|---|
 | `setConfig(name, recordsResolver, gatewayURLs)` | registered names only | the name's own authority |
-| `setStealthRecord(name, coinType, value)` | any name below a registered one | its authority: the name itself if registered, otherwise its nearest registered ancestor |
+| `setChains(name, coinTypes, enabled)` | registered names only | the name's own authority |
+| `setMetaAddress(name, value)` | any name below a registered one | its authority: the name itself if registered, otherwise its nearest registered ancestor |
 
-A parent such as `fkey.eth` therefore writes the records of its wildcard usernames, which exist only
+A parent such as `fkey.eth` therefore writes the meta-addresses of its wildcard usernames, which exist only
 in its gateway. Once a username is registered, only its holder writes its record, and a record the
 parent wrote before is no longer read. A records resolver must be a contract other than
 `StealthResolver`.
 
-**Trust.** A name is governed by its authority: records, gateway and, in verified mode, the
-meta-address it is verified against. This is the ENSIP's trust model for wildcard names. A
+**Trust.** A name is governed by its authority: records, gateway, chain list and, in verified mode,
+the meta-address it is verified against. This is the ENSIP's trust model for wildcard names. A
 registered name is its own authority and reads nothing from its ancestors, so a parent's config never
 reaches it: no gateway URLs means no gateway, and its static address records are forwarded as set.
 To use a parent's gateway, a registered name sets the same URLs itself. Its owner should be the only
@@ -106,11 +117,12 @@ holder writes.
    `PermissionedResolver` through ENS's `VerifiableFactory`.
 2. `setConfig(name, recordsResolver, gatewayURLs)` with the gateway's URLs (for a Fluidkey user,
    Fluidkey's); empty URLs mean no gateway.
-3. `setStealthRecord(name, coinType, value)` for each coin type.
-4. Set the name's resolver in its ENSv2 registry to `StealthResolver`.
+3. `setChains(name, coinTypes, true)` with the chains the recipient scans.
+4. `setMetaAddress(name, value)`.
+5. Set the name's resolver in its ENSv2 registry to `StealthResolver`.
 
-A smart account can batch all four. For a wildcard username, the parent's holder calls
-`setStealthRecord` for the username's name; the parent's records resolver can be an offchain one.
+A smart account can batch all five. For a wildcard username, the parent's holder calls
+`setMetaAddress` for the username's name; the parent's records resolver can be an offchain one.
 
 ## Contracts
 
@@ -127,7 +139,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 19,833 | 4,743 |
+| `StealthResolver` | 20,683 | 3,893 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
 `eth_call` costs; verified-mode numbers use a mock verifier and exclude the scheme's curve arithmetic.
@@ -136,15 +148,16 @@ read cost.
 
 | Path | Gas |
 |---|---|
-| `resolve` wildcard name, address, `OffchainLookup` revert | 38,590 |
-| `resolve` registered name, address, `OffchainLookup` revert | 22,989 |
-| `resolveStealthCallback`, unverified (wildcard name) | 39,578 + verifier |
-| `resolveStealthCallback`, verified (registered name) | 27,907 + verifier |
-| `verifyStealthResolution` | 6,650 + verifier |
-| `resolve` text, forwarded to a `PermissionedResolver` | 61,209 |
+| `resolve` wildcard name, address, `OffchainLookup` revert | 40,748 |
+| `resolve` registered name, address, `OffchainLookup` revert | 23,147 |
+| `resolveStealthCallback`, unverified (wildcard name) | 44,027 + verifier |
+| `resolveStealthCallback`, verified (registered name) | 28,355 + verifier |
+| `verifyStealthResolution` | 6,928 + verifier |
+| `resolve` text, forwarded to a `PermissionedResolver` | 61,167 |
 | `text` on the `PermissionedResolver` directly (reference) | 3,261 |
-| `setConfig`, records resolver and one URL (transaction) | 163,120 |
-| `setStealthRecord`, 67-byte scheme-1 record (transaction) | 179,108 |
+| `setConfig`, records resolver and one URL (transaction) | 163,076 |
+| `setChains`, one chain (transaction) | 88,931 |
+| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 178,601 |
 
 ## Build and test
 

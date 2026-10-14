@@ -139,43 +139,95 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         assertEq(abi.decode(v, (string[])).length, 0);
     }
 
-    // Who may write the stealth record.
+    // Who may write the meta-address.
 
-    function test_setStealthRecord_authority() public {
-        assertTrue(resolver.canSetStealthRecord(dns("alice.fkey.eth"), alice), "own name");
-        assertFalse(resolver.canSetStealthRecord(dns("alice.fkey.eth"), fluidkey), "parent");
-        assertTrue(resolver.canSetStealthRecord(dns("bob.fkey.eth"), fluidkey), "wildcard");
-        assertFalse(resolver.canSetStealthRecord(dns("bob.fkey.eth"), alice), "sibling");
-        assertTrue(resolver.canSetStealthRecord(dns("x.alice.fkey.eth"), alice), "below own");
-        assertFalse(resolver.canSetStealthRecord(dns("eth"), address(this)), "top-level");
-        assertFalse(resolver.canSetStealthRecord(dns("x.eth"), address(this)), "unregistered 2LD");
-        assertFalse(resolver.canSetStealthRecord(dns(""), address(this)), "root");
+    function test_setMetaAddress_authority() public {
+        assertTrue(resolver.canSetMetaAddress(dns("alice.fkey.eth"), alice), "own name");
+        assertFalse(resolver.canSetMetaAddress(dns("alice.fkey.eth"), fluidkey), "parent");
+        assertTrue(resolver.canSetMetaAddress(dns("bob.fkey.eth"), fluidkey), "wildcard");
+        assertFalse(resolver.canSetMetaAddress(dns("bob.fkey.eth"), alice), "sibling");
+        assertTrue(resolver.canSetMetaAddress(dns("x.alice.fkey.eth"), alice), "below own");
+        assertFalse(resolver.canSetMetaAddress(dns("eth"), address(this)), "top-level");
+        assertFalse(resolver.canSetMetaAddress(dns("x.eth"), address(this)), "unregistered 2LD");
+        assertFalse(resolver.canSetMetaAddress(dns(""), address(this)), "root");
         vm.prank(stranger);
         vm.expectRevert(
             abi.encodeWithSelector(
                 StealthResolver.Unauthorized.selector, dns("bob.fkey.eth"), stranger
             )
         );
-        resolver.setStealthRecord(dns("bob.fkey.eth"), 60, hex"0102");
+        resolver.setMetaAddress(dns("bob.fkey.eth"), hex"0102");
     }
 
-    function test_setStealthRecord_byDelegatedSetResolverRole() public {
+    function test_setMetaAddress_byDelegatedSetResolverRole() public {
         address delegate = makeAddr("delegate");
         uint256 tokenId = fkeyRegistry.getTokenId(uint256(keccak256("alice")));
         vm.prank(alice);
         fkeyRegistry.grantRoles(tokenId, RegistryRolesLib.ROLE_SET_RESOLVER, delegate);
-        setRecord(delegate, "alice.fkey.eth", COIN_ETH, META);
+        setMeta(delegate, "alice.fkey.eth", META);
     }
 
-    function test_setStealthRecord_emitsAndClears() public {
+    function test_setMetaAddress_emitsAndClears() public {
+        setChain(alice, "alice.fkey.eth", COIN_ETH, true);
         vm.expectEmit(address(resolver));
-        emit StealthResolver.StealthRecordChanged(aliceNode, dns("alice.fkey.eth"), COIN_ETH, META);
-        setRecord(alice, "alice.fkey.eth", COIN_ETH, META);
-        setRecord(alice, "alice.fkey.eth", COIN_ETH, "");
+        emit StealthResolver.MetaAddressChanged(aliceNode, dns("alice.fkey.eth"), META);
+        setMeta(alice, "alice.fkey.eth", META);
+        setMeta(alice, "alice.fkey.eth", "");
         vm.expectRevert(
             abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, aliceNode, COIN_ETH)
         );
         resolver.verifyStealthResolution(aliceNode, COIN_ETH, address(1), "");
+    }
+
+    // Chain lists.
+
+    /// @dev Only the registered name's own authority writes its chain list; wildcard names and
+    ///      registered names below it have none of their own.
+    function test_setChains_authority() public {
+        uint256[] memory coinTypes = new uint256[](1);
+        coinTypes[0] = COIN_ETH;
+        vm.prank(fluidkey);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                StealthResolver.Unauthorized.selector, dns("alice.fkey.eth"), fluidkey
+            )
+        );
+        resolver.setChains(dns("alice.fkey.eth"), coinTypes, true);
+        vm.prank(fluidkey);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                StealthResolver.Unauthorized.selector, dns("bob.fkey.eth"), fluidkey
+            )
+        );
+        resolver.setChains(dns("bob.fkey.eth"), coinTypes, true);
+    }
+
+    /// @dev A wildcard name uses its authority's list; a registered name only its own.
+    function test_isStealthChain() public {
+        assertTrue(resolver.isStealthChain(dns("bob.fkey.eth"), COIN_ETH), "fkey.eth's list");
+        assertFalse(resolver.isStealthChain(dns("bob.fkey.eth"), 10), "not listed");
+        assertFalse(resolver.isStealthChain(dns("alice.fkey.eth"), COIN_ETH), "nothing inherited");
+        setChain(alice, "alice.fkey.eth", COIN_BASE, true);
+        assertTrue(resolver.isStealthChain(dns("alice.fkey.eth"), COIN_BASE));
+        assertTrue(resolver.isStealthChain(dns("x.alice.fkey.eth"), COIN_BASE), "below alice");
+        setChain(alice, "alice.fkey.eth", COIN_BASE, false);
+        assertFalse(resolver.isStealthChain(dns("alice.fkey.eth"), COIN_BASE), "removed");
+    }
+
+    function test_setChains_emits() public {
+        vm.expectEmit(address(resolver));
+        emit StealthResolver.ChainChanged(aliceNode, dns("alice.fkey.eth"), COIN_BASE, true);
+        setChain(alice, "alice.fkey.eth", COIN_BASE, true);
+    }
+
+    /// @dev The verifier answers with an EVM address, so only EVM coin types can be listed.
+    function test_setChains_nonEVMReverts() public {
+        uint256[] memory coinTypes = new uint256[](2);
+        coinTypes[0] = COIN_ETH;
+        coinTypes[1] = 0; // Bitcoin
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(StealthResolver.InvalidChain.selector, 0));
+        resolver.setChains(dns("alice.fkey.eth"), coinTypes, true);
     }
 
     function test_setConfig_expiredNameReverts() public {
