@@ -338,14 +338,21 @@ contract StealthResolver is
     ////////////////////////////////////////////////////////////////////////
 
     /// @notice Resolves `data` for the DNS-encoded `name`, including names absent from the registry.
-    /// @dev ENSIP-10; ENSIP-30 Sections 1 and 4. `multicall(bytes[])` is answered as a batch.
+    /// @dev ENSIP-10; ENSIP-30 Sections 1 and 4. `multicall(bytes[])` and
+    ///      `multicallWithNodeCheck(bytes32, bytes[])` are answered as a batch.
     function resolve(bytes calldata name, bytes calldata data)
         external
         view
         returns (bytes memory)
     {
-        if (bytes4(data) == IMulticallable.multicall.selector) {
-            _resolveMulticall(name, data);
+        bytes4 selector = bytes4(data);
+        if (selector == IMulticallable.multicall.selector) {
+            _resolveMulticall(name, abi.decode(data[4:], (bytes[])));
+        }
+        if (selector == IMulticallable.multicallWithNodeCheck.selector) {
+            _checkNode(name, data);
+            (, bytes[] memory calls) = abi.decode(data[4:], (bytes32, bytes[]));
+            _resolveMulticall(name, calls);
         }
         return _resolveOne(name, data);
     }
@@ -382,7 +389,8 @@ contract StealthResolver is
         return abi.encode(resolved == address(0) ? bytes("") : abi.encodePacked(resolved));
     }
 
-    /// @notice CCIP-Read success callback for `resolve(name, multicall(...))`.
+    /// @notice CCIP-Read success callback for `resolve(name, multicall(...))` and the
+    ///         `multicallWithNodeCheck` form.
     /// @dev ENSIP-10 batched resolution; ENSIP-30 Section 4 lookups inside it are verified by
     ///      `resolveStealthCallback` before this runs.
     /// @param response `abi.encode(Batch)` with every lookup done.
@@ -453,12 +461,12 @@ contract StealthResolver is
             callResolver(recordsResolver, name, data, false, "", BATCH_GATEWAY_PROVIDER.gateways());
     }
 
-    /// @dev `resolve(name, multicall(calls))`: every call resolved as a single `resolve()` on this
-    ///      contract, offchain lookups combined through the batch gateway. Never returns normally.
-    ///      Safety, not convenience: forwarded whole, an address call inside the batch would reach
-    ///      the records resolver and bypass the gateway path.
-    function _resolveMulticall(bytes calldata name, bytes calldata data) internal view {
-        bytes[] memory calls = abi.decode(data[4:], (bytes[]));
+    /// @dev `resolve(name, multicall(calls))` and the `multicallWithNodeCheck` form: every call
+    ///      resolved as a single `resolve()` on this contract, offchain lookups combined through
+    ///      the batch gateway. Never returns normally. Safety, not convenience: forwarded whole, an
+    ///      address call inside the batch would reach the records resolver and bypass the gateway
+    ///      path.
+    function _resolveMulticall(bytes calldata name, bytes[] memory calls) internal view {
         for (uint256 i; i < calls.length; ++i) {
             calls[i] = abi.encodeCall(IExtendedResolver.resolve, (name, calls[i]));
         }

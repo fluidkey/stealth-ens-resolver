@@ -9,6 +9,7 @@ import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol
 import {IAddressResolver} from "@ens/contracts/resolvers/profiles/IAddressResolver.sol";
 import {IContentHashResolver} from "@ens/contracts/resolvers/profiles/IContentHashResolver.sol";
 import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol";
+import {IHasAddressResolver} from "@ens/contracts/resolvers/profiles/IHasAddressResolver.sol";
 import {ITextResolver} from "@ens/contracts/resolvers/profiles/ITextResolver.sol";
 import {IUniversalResolver} from "@ens/contracts/universalResolver/IUniversalResolver.sol";
 import {NameCoder} from "@ens/contracts/utils/NameCoder.sol";
@@ -137,16 +138,43 @@ contract StealthResolverForwardTest is StealthResolverFixture {
     /// @dev Only `addr`, `addr(coinType)` and `multicall` take the gateway path; other selectors
     ///      are forwarded, so a static address in the records resolver of a gateway-configured
     ///      name is readable through them. Pinned until per-coin-type coexistence is decided.
-    function test_otherSelectorsReachStaticAddress() public {
+    /// @dev Both multicall forms are split, so an address item inside them takes the gateway path
+    ///      and cannot reach a static address in the records resolver.
+    function test_multicallWithNodeCheck_splitLikeMulticall() public {
         vm.prank(fluidkey);
         fkeyRecords.setAddr(bobNode, address(0xBEEF));
         bytes[] memory calls = new bytes[](1);
         calls[0] = abi.encodeCall(IAddrResolver.addr, (bobNode));
-        bytes memory v = resolver.resolve(
-            dns("bob.fkey.eth"),
-            abi.encodeCall(IMulticallable.multicallWithNodeCheck, (bobNode, calls))
+        EIP3668.Params memory p = expectLookup(
+            address(resolver),
+            abi.encodeCall(
+                resolver.resolve,
+                (
+                    dns("bob.fkey.eth"),
+                    abi.encodeCall(IMulticallable.multicallWithNodeCheck, (bobNode, calls))
+                )
+            )
         );
-        assertEq(abi.decode(abi.decode(v, (bytes[]))[0], (address)), address(0xBEEF));
+        assertEq(p.sender, address(resolver), "batched: the address item went offchain");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NodeMismatch.selector, aliceNode, bobNode)
+        );
+        resolver.resolve(
+            dns("bob.fkey.eth"),
+            abi.encodeCall(IMulticallable.multicallWithNodeCheck, (aliceNode, calls))
+        );
+    }
+
+    /// @dev Selectors other than the address profiles and the multicall forms are forwarded, so a
+    ///      static address in the records resolver stays readable through them.
+    function test_otherSelectorsReachStaticAddress() public {
+        vm.prank(fluidkey);
+        fkeyRecords.setAddr(bobNode, address(0xBEEF));
+        bytes memory v = resolver.resolve(
+            dns("bob.fkey.eth"), abi.encodeCall(IHasAddressResolver.hasAddr, (bobNode, COIN_ETH))
+        );
+        assertTrue(abi.decode(v, (bool)));
     }
 
     function test_addressWithoutGatewayForwarded() public {

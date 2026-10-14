@@ -87,6 +87,32 @@ contract StealthResolverE2ETest is StealthResolverFixture {
         assertEq(abi.decode(results[2], (bytes)), hex"e301");
     }
 
+    /// @dev The node-checked form is split the same way; the node is checked against the name.
+    function test_multicallWithNodeCheck_mixesForwardedAndStealth() public {
+        vm.prank(fluidkey);
+        fkeyRecords.setText(bobNode, "avatar", "ipfs://bob");
+        gwClaimed = makeAddr("chosen");
+        gwVerificationData = "ok";
+
+        bytes[] memory calls = new bytes[](2);
+        calls[0] = abi.encodeCall(ITextResolver.text, (bobNode, "avatar"));
+        calls[1] = abi.encodeCall(IAddrResolver.addr, (bobNode));
+        (bool ok, bytes memory v) = ccipCall(
+            address(resolver),
+            abi.encodeCall(
+                resolver.resolve,
+                (
+                    dns("bob.fkey.eth"),
+                    abi.encodeCall(IMulticallable.multicallWithNodeCheck, (bobNode, calls))
+                )
+            )
+        );
+        assertTrue(ok);
+        bytes[] memory results = abi.decode(abi.decode(v, (bytes)), (bytes[]));
+        assertEq(abi.decode(results[0], (string)), "ipfs://bob");
+        assertEq(abi.decode(results[1], (address)), gwClaimed);
+    }
+
     function test_multicall_failingItemCarriesItsError() public {
         setUpAliceVerified(COIN_ETH);
         vm.prank(alice);
