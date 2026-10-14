@@ -1,6 +1,8 @@
 {
+  "FluidkeyVerifier_verify_signed": "12183",
+  "FluidkeyVerifier_verify_verified": "19165",
   "PermissionedResolver_text_direct_reference": "3261",
-  "Scheme1Verifier_verify": "16084",
+  "Scheme1Verifier_verify": "16122",
   "resolveStealthCallback_unverified": "43675",
   "resolveStealthCallback_verified_mockVerifier": "29100",
   "resolve_forwardedText_PermissionedResolver": "61253",

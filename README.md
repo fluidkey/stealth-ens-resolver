@@ -153,7 +153,8 @@ The EVM has no secp256k1 arithmetic except `ecrecover`, which can compute `a·G 
 only the result's address. That covers the last step. Hashing `S` needs its coordinates, so the
 gateway sends `S` and the verifier checks that its address is that of `e·P_view`; a different `S`
 with the same address is a 160-bit second preimage of keccak256. Two `ecrecover` calls, no curve
-library. Scheme 1's `verificationData` is therefore 96 bytes, `e || S.x || S.y`, where the ENSIP
+library: `LibEcrecover` holds the construction, the one Chainlink's VRF verifier uses in production,
+and its tests check it against Chainlink's code and against direct key derivation. Scheme 1's `verificationData` is therefore 96 bytes, `e || S.x || S.y`, where the ENSIP
 draft's Section 4 has the 32-byte `e` alone; this is raised against the ENSIP, and a gateway
 computes `S` anyway.
 
@@ -164,6 +165,45 @@ gateway's address unchecked: unverified mode trusts the gateway and, for batched
 gateway. A verifier must be as immutable as the resolver, since it decides the derived address:
 `Scheme1Verifier` has no state and no owner.
 
+### Fluidkey stealth Safe (FK1)
+
+`FluidkeyVerifier` verifies Fluidkey's scheme as fluidkey-stealth-account-kit 1.1.1 derives it. It
+is not scheme 1: the key exchange uses the spending key, the stealth key is a multiple of it, and
+the stealth address is a counterfactual 1-of-1 Safe owned by that key:
+
+```
+S     = e·P_spend                       shared secret point (ECDH with the spending key)
+h     = keccak256(S.x || S.y) mod n     uncompressed point, no prefix
+owner = address(h·P_spend)
+stealth address = CREATE2 address of a Safe 1.3.0 proxy owned by `owner`, threshold 1
+```
+
+The Safe uses the default Safe 1.3.0 deployments (factory, L1 singleton, compatibility fallback
+handler), which have the same addresses on every chain, so a stealth Safe does too. Its setup `to`
+and `data` follow the account's auto-earn setting and affect who can move funds, so they are fixed
+by the scheme and selected by the record, never by the gateway (ENSIP-30 Section 5). The meta-address
+is 65 bytes, the compressed spending key followed by the Earn module's `configHash`, as the Earn
+module itself stores per account: 0 means auto-earn off and an empty setup; any other value means a
+setup that enables the Earn module and installs that `configHash`, rebuilt from a fixed template
+that reproduces the setup data Fluidkey publishes for auto-earn v1.1. Changing auto-earn settings
+is a record write; a new Earn module or Safe version is a new scheme, FK2, with its own verifier
+and resolver.
+
+Verified mode takes the scheme 1 layout, `e || S.x || S.y`, and the same two `ecrecover` calls.
+Unverified mode (no record) requires the gateway's response to be signed: `verificationData` is
+`abi.encode(uint64 expires, bytes signature)`, an EIP-712 signature (domain `FluidkeyVerifier`,
+version `1`) over `StealthResolution(address resolver, bytes32 node, uint256 coinType, address
+stealthAddress, uint64 expires)` by an account that `FluidkeySigners` lists. That binds the
+response to the resolver, name, chain and address, and stops a batch gateway from substituting the
+address; it authenticates Fluidkey and is not verification under the ENSIP. `FluidkeySigners` is
+owned by Fluidkey so signing keys rotate without redeploying; it decides nothing in verified mode.
+The scheme ID, FK1 (`0x464B31`, 4606769), is a constructor argument: the scheme's ERC declares it.
+
+Fluidkey's gateway answers with the Safe address and, if the name has a record (read onchain as the
+callback reads it), `e || S.x || S.y`; otherwise the signed expiry. Records written for FK1 keep
+the client-side derivation flag clear: Fluidkey finds payments by regenerating its own ephemeral
+keys and cannot detect ones a sender derived.
+
 ## Contracts
 
 | Contract | Role |
@@ -172,6 +212,9 @@ gateway. A verifier must be as immutable as the resolver, since it decides the d
 | `interfaces/IStealthResolver` | ENSIP Section 5, verbatim |
 | `interfaces/IStealthVerifier` | Scheme-specific verification, one verifier per scheme |
 | `verifiers/Scheme1Verifier` | ERC-5564 scheme 1 (see Scheme 1) |
+| `verifiers/FluidkeyVerifier` | Fluidkey stealth Safe, FK1 (see Fluidkey stealth Safe) |
+| `verifiers/FluidkeySigners` | Fluidkey gateway signers for FK1's unverified mode, owned by Fluidkey |
+| `verifiers/LibEcrecover` | secp256k1 `a·G + b·Q` on `ecrecover`, shared by the verifiers |
 
 ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCoder`, `ENSIP19`
 (ens-contracts); `LibRegistry`, `RegistryRolesLib` and the registry interfaces (namechain).
@@ -181,7 +224,9 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
 | `StealthResolver` | 20,600 | 3,976 |
-| `Scheme1Verifier` | 1,627 | 22,949 |
+| `Scheme1Verifier` | 1,651 | 22,925 |
+| `FluidkeyVerifier` | 5,518 | 19,058 |
+| `FluidkeySigners` | 894 | 23,682 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
 `eth_call` costs; verified-mode numbers use a mock verifier, and the verifier's own cost is listed
@@ -196,7 +241,9 @@ read cost.
 | `resolveStealthCallback`, unverified (wildcard name) | 43,675 + verifier |
 | `resolveStealthCallback`, verified (registered name) | 29,100 + verifier |
 | `resolve` registered name, `verifyStealthResolution` | 26,828 + verifier |
-| `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,084 |
+| `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,122 |
+| `FluidkeyVerifier.verify`, verified mode, auto-earn Safe | 19,165 |
+| `FluidkeyVerifier.verify`, signed unverified response | 12,183 |
 | `resolve` text, forwarded to a `PermissionedResolver` | 61,253 |
 | `text` on the `PermissionedResolver` directly (reference) | 3,261 |
 | `setConfig`, records resolver and one URL (transaction) | 140,884 |
@@ -216,11 +263,13 @@ forge test
 ```
 
 Tests run on namechain's own ENSv1 and ENSv2 fixtures, including resolution through
-UniversalResolverV2. A fork test runs against ENS's ENSv2 deployment on Sepolia when
-`SEPOLIA_RPC_URL` is set. It is pinned to a block, so the RPC must serve historical state:
+UniversalResolverV2. Two fork tests are pinned to blocks, so their RPCs must serve historical
+state: one against ENS's ENSv2 deployment on Sepolia when `SEPOLIA_RPC_URL` is set, one checking
+`FluidkeyVerifier`'s Safe constants against Ethereum mainnet (the live factory deploys the Safe at
+the predicted address) when `MAINNET_RPC_URL` is set:
 
 ```bash
-SEPOLIA_RPC_URL=<rpc> forge test --match-path "test/fork/*"
+SEPOLIA_RPC_URL=<rpc> MAINNET_RPC_URL=<rpc> forge test --match-path "test/fork/*"
 ```
 
 The scheme 1 test vectors in `test/utils/Scheme1Vectors.sol` are derivations by the ScopeLift SDK,
@@ -230,6 +279,18 @@ each also rederived from the curve operations by the generator. To regenerate th
 npm install --prefix <dir> --ignore-scripts @scopelift/stealth-address-sdk@1.0.0-beta.5
 node script/vectors/scheme1.mjs <dir> > test/utils/Scheme1Vectors.sol && forge fmt
 ```
+
+The FK1 vectors in `test/utils/FluidkeyVectors.sol` come from Fluidkey's stealth-account-kit the
+same way, for three Safe setups (auto-earn off, the production v1.1 `configHash`, another one):
+
+```bash
+npm install --prefix <dir> --ignore-scripts @fluidkey/stealth-account-kit@1.1.1
+node script/vectors/fluidkey.mjs <dir> > test/utils/FluidkeyVectors.sol && forge fmt
+```
+
+`test/reference/ChainlinkVRF.sol` is Chainlink's `VRF.sol`, vendored unchanged at a pinned commit as
+the reference `LibEcrecover` is tested against; it is never imported by `src/` and is excluded from
+formatting.
 
 Running a subset of tests rewrites `snapshots/` without the gas file; run the full suite before
 committing, or restore it with `git checkout snapshots/`.
@@ -265,6 +326,14 @@ has one address on every chain, and the script does nothing if it is already the
 
 ```bash
 forge script script/DeployScheme1Verifier.s.sol --fork-url $RPC_URL
+```
+
+`script/DeployFluidkeyVerifier.s.sol` deploys `FluidkeySigners` (owned by `SIGNERS_OWNER`) and
+`FluidkeyVerifier` the same way, with salts `keccak256("ENSIP-30 FluidkeySigners")` and
+`keccak256("ENSIP-30 FluidkeyVerifier")`. Deploy it only once the scheme's ERC declares the ID:
+
+```bash
+SIGNERS_OWNER=<a> SCHEME_ID=4606769 forge script script/DeployFluidkeyVerifier.s.sol --fork-url $RPC_URL
 ```
 
 `script/Deploy.s.sol` then deploys `StealthResolver` through the canonical CREATE2 deployer

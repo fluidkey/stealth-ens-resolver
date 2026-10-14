@@ -12,7 +12,7 @@ optimizer = true
 optimizer_runs = 1000
 bytecode_hash = "none"
 cbor_metadata = false
-ignored_warnings_from = ["lib/"]
+ignored_warnings_from = ["lib/", "test/reference/"]
 fs_permissions = []
 
 [profile.ci]
@@ -22,3 +22,5 @@ verbosity = 3
 [fmt]
 line_length = 100
 sort_imports = true
+# Vendored reference code keeps its upstream formatting.
+ignore = ["test/reference/*"]
