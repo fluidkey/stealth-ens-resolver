@@ -15,7 +15,10 @@ interface IStealthVerifier {
     ///      not depend on `claimed`. Reverts on a malformed `metaAddress` (ENSIP-30 Section 1,
     ///      failure semantics).
     ///      Unverified mode (`metaAddress` empty, ENSIP-30 Section 4, step 3): the verifier decides
-    ///      what, if anything, to check, and returns the address to resolve to.
+    ///      what, if anything, to check, and returns the address to resolve to. The response may
+    ///      have been relayed by a batch gateway (`resolve(name, multicall(...))`), so a verifier
+    ///      that checks nothing also trusts that batch gateway; one that authenticates the response
+    ///      (e.g. a signature by the stealth gateway) does not.
     ///      `node` and `coinType` identify the resolution so a verifier can bind gateway-supplied
     ///      data to it (e.g. replay protection across names and chains); `msg.sender` is the resolver.
     /// @param node The namehash being resolved.
