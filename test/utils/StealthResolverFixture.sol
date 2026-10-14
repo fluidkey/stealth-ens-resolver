@@ -133,9 +133,10 @@ abstract contract StealthResolverFixture is V1Fixture, V2Fixture, CCIPClient {
         resolver.setStealthRecord(dns(name), coinType, value);
     }
 
-    /// @dev Alice's config pointing at her own records resolver, and her stealth record.
+    /// @dev Alice's config pointing at her own records resolver and Fluidkey's gateway (a
+    ///      registered name inherits nothing), and her stealth record.
     function setUpAliceVerified(uint256 coinType) internal {
-        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), STEALTH_GW);
         setRecord(alice, "alice.fkey.eth", coinType, META);
     }
 

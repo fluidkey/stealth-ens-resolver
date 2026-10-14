@@ -55,10 +55,11 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
         setUpAliceVerified(COIN_ETH);
         _reregisterAlice(carol);
         assertEq(_record("alice.fkey.eth").length, 0, "alice's record not served");
-        assertTrue(_unverified("alice.fkey.eth"), "nor verified against");
         (address r,) = resolver.getResolver(dns("alice.fkey.eth"));
-        assertEq(r, address(fkeyRecords), "alice's config not read");
+        assertEq(r, address(0), "alice's config not read");
 
+        setConfig(carol, "alice.fkey.eth", address(0), STEALTH_GW);
+        assertTrue(_unverified("alice.fkey.eth"), "alice's record not verified against");
         setRecord(carol, "alice.fkey.eth", COIN_ETH, META);
         assertEq(_record("alice.fkey.eth"), META);
         assertFalse(_unverified("alice.fkey.eth"), "carol's record verifies");

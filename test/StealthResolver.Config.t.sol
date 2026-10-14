@@ -127,16 +127,16 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         resolver.setConfig(dns("alice.fkey.eth"), eoa, new string[](0));
     }
 
-    /// @dev Zero records resolver and empty URLs fall back to the nearest ancestor's.
-    function test_setConfig_clearFallsBackToInherited() public {
+    /// @dev A registered name's config is its own: clearing it does not fall back to fkey.eth's.
+    function test_setConfig_registeredNameNeverInherits() public {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "https://alice.gw");
         setConfig(alice, "alice.fkey.eth", address(0), "");
         (address r,) = resolver.getResolver(dns("alice.fkey.eth"));
-        assertEq(r, address(fkeyRecords));
+        assertEq(r, address(0));
         bytes memory v = resolver.resolve(
             dns("alice.fkey.eth"), abi.encodeCall(IStealthResolver.gatewayURLs, (aliceNode))
         );
-        assertEq(abi.decode(v, (string[]))[0], STEALTH_GW);
+        assertEq(abi.decode(v, (string[])).length, 0);
     }
 
     // Who may write the stealth record.
@@ -191,24 +191,33 @@ contract StealthResolverConfigTest is StealthResolverFixture {
 
     function test_getResolver_ownInheritedNone() public {
         (address r,) = resolver.getResolver(dns("bob.fkey.eth"));
-        assertEq(r, address(fkeyRecords), "inherited from fkey.eth");
+        assertEq(r, address(fkeyRecords), "wildcard: fkey.eth's");
+        (r,) = resolver.getResolver(dns("alice.fkey.eth"));
+        assertEq(r, address(0), "registered, no config: nothing inherited");
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
         (r,) = resolver.getResolver(dns("alice.fkey.eth"));
         assertEq(r, address(aliceRecords), "own");
+        (r,) = resolver.getResolver(dns("x.alice.fkey.eth"));
+        assertEq(r, address(aliceRecords), "wildcard below alice: alice's");
         (r,) = resolver.getResolver(dns("other.eth"));
         assertEq(r, address(0), "none");
     }
 
-    /// @dev Fields inherit independently: own records resolver, gateway URLs from fkey.eth.
-    function test_gatewayURLs_effectiveThroughResolve() public {
+    /// @dev Through `resolve()` a wildcard name reports its authority's URLs; a registered name
+    ///      only its own.
+    function test_gatewayURLs_throughResolve() public {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
         assertEq(resolver.gatewayURLs(aliceNode).length, 0, "direct: own only");
         bytes memory v = resolver.resolve(
             dns("alice.fkey.eth"), abi.encodeCall(IStealthResolver.gatewayURLs, (aliceNode))
         );
+        assertEq(abi.decode(v, (string[])).length, 0, "registered: not fkey.eth's");
+        v = resolver.resolve(
+            dns("bob.fkey.eth"), abi.encodeCall(IStealthResolver.gatewayURLs, (bobNode))
+        );
         string[] memory effective = abi.decode(v, (string[]));
         assertEq(effective.length, 1);
-        assertEq(effective[0], STEALTH_GW);
+        assertEq(effective[0], STEALTH_GW, "wildcard: fkey.eth's");
     }
 
     function test_gatewayURLs_nodeMustMatchName() public {

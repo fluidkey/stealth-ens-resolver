@@ -31,8 +31,9 @@ ENSv2 registry ── resolver ──▶ StealthResolver (immutable, one per sch
 
 ### Resolution rules
 
-`StealthResolver` is queried through ENSIP-10 `resolve()` only. For a name N, each config field is
-N's own value, otherwise the nearest ancestor's.
+`StealthResolver` is queried through ENSIP-10 `resolve()` only. A name N resolves with the config
+and records of its **authority** (see "Who may write"): N itself if registered, otherwise its nearest
+registered ancestor. Nothing is inherited past a registered name.
 
 | Query | Result |
 |---|---|
@@ -42,7 +43,7 @@ N's own value, otherwise the nearest ancestor's.
 | `data(node, "stealth-meta-address[<scheme>][<coinType>]")` | Answered from storage: the value the callback verifies against. |
 | Any other record | Forwarded to the records resolver, including offchain ones. |
 | `resolve(name, multicall(...))` | Answered as one batch (ERC-7996 `RESOLVE_MULTICALL`). |
-| `gatewayURLs(node)` | N's own URLs; through `resolve()`, the effective URLs. |
+| `gatewayURLs(node)` | N's own URLs; through `resolve()`, its authority's. |
 | `getResolver(name)` (`ICompositeResolver`) | The records resolver, so apps know where to edit other records. |
 
 **The record served is the record verified**, for every name, wildcard names included. Only the
@@ -58,10 +59,13 @@ Only `addr`, `addr(coinType)` and `multicall` take the gateway path. Other selec
 `multicallWithNodeCheck` or `hasAddr`, are forwarded, so a static address left in the records
 resolver of a gateway-configured name is readable through them. Do not keep one there.
 
-**Privacy.** A single address lookup goes from the client to the stealth gateway. In
+**Batched lookups.** A single address lookup goes from the client to the stealth gateway. In
 `resolve(name, multicall(...))` every lookup is batched through ENS's batch gateway, as the
-UniversalResolver does for batched resolutions, so that gateway sees the stealth gateway's response,
-including `verificationData`.
+UniversalResolver does for batched resolutions, unless the client batches locally
+(`x-batch-gateway:true`). That gateway then sees the stealth gateway's response, including
+`verificationData`, and in unverified mode it could replace the address: a verifier that checks
+nothing in unverified mode also trusts the batch gateway; one that authenticates the response, such
+as a signature by the stealth gateway, does not. Verified mode is unaffected.
 
 ### Who may write
 
@@ -83,10 +87,10 @@ parent wrote before is no longer read. A records resolver must be a contract oth
 
 **Trust.** A name is governed by its authority: records, gateway and, in verified mode, the
 meta-address it is verified against. This is the ENSIP's trust model for wildcard names. A
-registered name escapes its parent by setting its own records resolver, gateway URLs and stealth
-records, and its owner should then be the only holder of `ROLE_SET_RESOLVER` on it. A registered
-name that sets only its records resolver still inherits the parent's gateway, which then decides,
-unverified, every coin type it has no record for.
+registered name is its own authority and reads nothing from its ancestors, so a parent's config never
+reaches it: no gateway URLs means no gateway, and its static address records are forwarded as set.
+To use a parent's gateway, a registered name sets the same URLs itself. Its owner should be the only
+holder of `ROLE_SET_RESOLVER` on it.
 
 **Re-registration.** State is keyed by the authority's ENSv2 resource, which the registry renews
 when an expired name is registered again, to anyone. `resolve()` therefore never reads a previous
@@ -100,7 +104,8 @@ holder writes.
 
 1. Deploy (or reuse) a records resolver for the name's other records, for example a
    `PermissionedResolver` through ENS's `VerifiableFactory`.
-2. `setConfig(name, recordsResolver, gatewayURLs)`; leave `gatewayURLs` empty to use a parent's.
+2. `setConfig(name, recordsResolver, gatewayURLs)` with the gateway's URLs (for a Fluidkey user,
+   Fluidkey's); empty URLs mean no gateway.
 3. `setStealthRecord(name, coinType, value)` for each coin type.
 4. Set the name's resolver in its ENSv2 registry to `StealthResolver`.
 
@@ -122,24 +127,24 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 20,001 | 4,575 |
+| `StealthResolver` | 19,833 | 4,743 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
 `eth_call` costs; verified-mode numbers use a mock verifier and exclude the scheme's curve arithmetic.
-Every `resolve()` walks the name through the registry to find its authority, which is most of the
+Every `resolve()` looks the name up in the registry to find its authority, which is most of the
 read cost.
 
 | Path | Gas |
 |---|---|
-| `resolve` wildcard name, address, `OffchainLookup` revert | 41,747 |
-| `resolve` registered name, address, `OffchainLookup` revert | 32,413 |
-| `resolveStealthCallback`, unverified (wildcard name) | 39,697 + verifier |
-| `resolveStealthCallback`, verified (registered name) | 28,026 + verifier |
-| `verifyStealthResolution` | 6,651 + verifier |
-| `resolve` text, forwarded to a `PermissionedResolver` | 66,719 |
+| `resolve` wildcard name, address, `OffchainLookup` revert | 38,590 |
+| `resolve` registered name, address, `OffchainLookup` revert | 22,989 |
+| `resolveStealthCallback`, unverified (wildcard name) | 39,578 + verifier |
+| `resolveStealthCallback`, verified (registered name) | 27,907 + verifier |
+| `verifyStealthResolution` | 6,650 + verifier |
+| `resolve` text, forwarded to a `PermissionedResolver` | 61,209 |
 | `text` on the `PermissionedResolver` directly (reference) | 3,261 |
-| `setConfig`, records resolver and one URL (transaction) | 163,230 |
-| `setStealthRecord`, 67-byte scheme-1 record (transaction) | 179,224 |
+| `setConfig`, records resolver and one URL (transaction) | 163,120 |
+| `setStealthRecord`, 67-byte scheme-1 record (transaction) | 179,108 |
 
 ## Build and test
 

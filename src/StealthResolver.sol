@@ -45,14 +45,15 @@ import {IStealthVerifier} from "./interfaces/IStealthVerifier.sol";
 ///      is keyed by that authority's registry resource, which ENSv2 renews when an expired name is
 ///      registered again, so a previous holder's state is never read.
 ///
-///      Per query for a DNS-encoded name N (config fields: N's own, else the nearest ancestor's):
-///      - EVM address record, effective gateway URLs non-empty: `OffchainLookup` to them; the
+///      Per query for a DNS-encoded name N, with the config of N's authority (nothing is inherited
+///      past a registered name, so an ancestor never governs a registered descendant):
+///      - EVM address record, gateway URLs non-empty: `OffchainLookup` to them; the
 ///        callback verifies if the stealth record for the coin type is stored, otherwise the
 ///        verifier decides (unverified mode). Non-EVM address records are forwarded: the verifier
 ///        answers with an EVM address.
 ///      - ENSIP-30 Section 1 record of this resolver's scheme: answered from storage, the same
 ///        value the callback verifies against.
-///      - Anything else: forwarded to the effective records resolver.
+///      - Anything else: forwarded to the records resolver.
 contract StealthResolver is
     ERC165,
     IStealthResolver,
@@ -80,10 +81,6 @@ contract StealthResolver is
         uint256 resource;
         /// @dev The authority is the name itself (the name is registered).
         bool exact;
-        /// @dev Effective records resolver (only if requested).
-        address recordsResolver;
-        /// @dev Effective gateway URLs (only if requested).
-        string[] urls;
     }
 
     /// @notice The ENSv2 root registry, used to find who may write a name's state.
@@ -169,6 +166,7 @@ contract StealthResolver is
     }
 
     /// @inheritdoc IERC7996
+    /// @dev ENSIP-10 batched resolution: `resolve(name, multicall(...))` (see `resolve`).
     function supportsFeature(bytes4 feature) external pure returns (bool) {
         return feature == ResolverFeatures.RESOLVE_MULTICALL;
     }
@@ -180,15 +178,16 @@ contract StealthResolver is
     /// @notice Sets the records resolver and gateway URLs of the registered name `name`.
     /// @dev ENSIP-30 Section 5: gateway URLs are stored per name; the setter is
     ///      implementation-defined. Allowed for whoever may set `name`'s resolver in the ENSv2
-    ///      registry (see `canSetConfig`). Empty `urls` / zero `recordsResolver` inherit the
-    ///      nearest ancestor's on the `resolve()` path.
+    ///      registry (see `canSetConfig`). Empty `urls`: no gateway, address records are
+    ///      forwarded. Applies to `name` and to the unregistered (wildcard) names below it; a
+    ///      registered name below it uses its own config only.
     /// @param name The DNS-encoded name.
     /// @param recordsResolver The resolver holding the name's other records.
     /// @param urls ERC-3668 gateway URLs for stealth address resolution.
     function setConfig(bytes calldata name, address recordsResolver, string[] memory urls)
         external
     {
-        NameState memory ctx = _context(name, false);
+        NameState memory ctx = _context(name);
         if (!ctx.exact || !_isAuthority(ctx, msg.sender)) revert Unauthorized(name, msg.sender);
         // Not this resolver (every query would recurse); not an account without code (forwarded
         // reads would fail while the name silently resolved unverified).
@@ -215,7 +214,7 @@ contract StealthResolver is
     function setStealthRecord(bytes calldata name, uint256 coinType, bytes calldata value)
         external
     {
-        NameState memory ctx = _context(name, false);
+        NameState memory ctx = _context(name);
         if (!_isAuthority(ctx, msg.sender)) revert Unauthorized(name, msg.sender);
         // A flag byte with reserved bits zero, then a non-empty meta-address: a flag-only record
         // would reach the verifier as an empty meta-address, i.e. unverified mode.
@@ -232,15 +231,17 @@ contract StealthResolver is
     ///         `PermissionedRegistry` below a top-level name and `account` holds
     ///         `ROLE_SET_RESOLVER` on its token (resource or registry-wide), as for
     ///         `PermissionedRegistry.setResolver`.
+    /// @dev ENSIP-30 Section 5: write authorization follows the rules for the name's resolver.
     /// @param name The DNS-encoded name.
     /// @param account The account to check.
     function canSetConfig(bytes calldata name, address account) external view returns (bool) {
-        NameState memory ctx = _context(name, false);
+        NameState memory ctx = _context(name);
         return ctx.exact && _isAuthority(ctx, account);
     }
 
     /// @notice Whether `account` may set the stealth records of `name`: as `canSetConfig`, for the
     ///         nearest registered name at or above `name`.
+    /// @dev ENSIP-30 Sections 1 and 5: write authorization follows the rules for the name's resolver.
     /// @param name The DNS-encoded name.
     /// @param account The account to check.
     function canSetStealthRecord(bytes calldata name, address account)
@@ -248,16 +249,17 @@ contract StealthResolver is
         view
         returns (bool)
     {
-        return _isAuthority(_context(name, false), account);
+        return _isAuthority(_context(name), account);
     }
 
     /// @notice The config set on the registered name `name` itself; empty for other names.
+    /// @dev ENSIP-30 Section 5: the gateway URLs stored per name, with the records resolver.
     function config(bytes calldata name)
         external
         view
         returns (address recordsResolver, string[] memory urls)
     {
-        NameState memory ctx = _context(name, false);
+        NameState memory ctx = _context(name);
         if (!ctx.exact) return (address(0), urls);
         Config storage c = _configs[ctx.key];
         return (c.recordsResolver, c.gatewayURLs);
@@ -275,9 +277,10 @@ contract StealthResolver is
 
     /// @inheritdoc IStealthResolver
     /// @dev ENSIP-30 Sections 2 and 5. The URLs last set by `setConfig` on `node` itself; through
-    ///      `resolve()` the effective URLs, which may be inherited from an ancestor. A node cannot
-    ///      be walked through the registry, so after a re-registration this returns the previous
-    ///      holder's URLs until the new holder calls `setConfig`; `resolve()` never does.
+    ///      `resolve()` those of the name's authority (for a wildcard name, its nearest registered
+    ///      ancestor). A node cannot be walked through the registry, so after a re-registration
+    ///      this returns the previous holder's URLs until the new holder calls `setConfig`;
+    ///      `resolve()` never does.
     function gatewayURLs(bytes32 node) external view returns (string[] memory) {
         return _configs[_configKeys[node]].gatewayURLs;
     }
@@ -316,9 +319,10 @@ contract StealthResolver is
     }
 
     /// @inheritdoc ICompositeResolver
-    /// @dev The effective records resolver: where `name`'s other records are read and edited.
+    /// @dev ENSIP-10. The records resolver of `name`'s authority: where its other records are read
+    ///      and edited.
     function getResolver(bytes calldata name) external view returns (address, bool) {
-        return (_context(name, true).recordsResolver, false);
+        return (_configs[_context(name).key].recordsResolver, false);
     }
 
     /// @notice ERC-3668 callback for address records.
@@ -336,7 +340,7 @@ contract StealthResolver is
             abi.decode(extraData, (bytes, uint256, bool));
         (address claimed, bytes memory verificationData) = abi.decode(response, (address, bytes));
         bytes32 node = NameCoder.namehash(name, 0);
-        bytes memory record = _records[_context(name, false).key][node][coinType];
+        bytes memory record = _records[_context(name).key][node][coinType];
         address resolved = record.length == 0
             ? VERIFIER.verify(node, coinType, "", verificationData, claimed)
             : _verify(node, coinType, record, verificationData, claimed);
@@ -345,6 +349,8 @@ contract StealthResolver is
     }
 
     /// @notice CCIP-Read success callback for `resolve(name, multicall(...))`.
+    /// @dev ENSIP-10 batched resolution; ENSIP-30 Section 4 lookups inside it are verified by
+    ///      `resolveStealthCallback` before this runs.
     /// @param response `abi.encode(Batch)` with every lookup done.
     /// @return The ABI-encoded `bytes[]` of per-call results; failed calls carry their error data.
     function resolveMulticallCallback(bytes calldata response, bytes calldata)
@@ -367,40 +373,41 @@ contract StealthResolver is
         returns (bytes memory)
     {
         bytes4 selector = bytes4(data);
-        NameState memory ctx = _context(name, true);
+        NameState memory ctx = _context(name);
+        Config storage c = _configs[ctx.key];
         if (selector == IStealthResolver.gatewayURLs.selector) {
             _checkNode(name, data);
-            return abi.encode(ctx.urls);
+            return abi.encode(c.gatewayURLs);
         }
         if (selector == IDataResolver.data.selector) {
             (, string memory key) = abi.decode(data[4:], (bytes32, string));
-            (bool isStealthKey, uint256 coinType) = _parseStealthKey(key);
+            (bool isStealthKey, uint256 keyCoinType) = _parseStealthKey(key);
             if (isStealthKey) {
-                return abi.encode(_records[ctx.key][_checkNode(name, data)][coinType]);
+                return abi.encode(_records[ctx.key][_checkNode(name, data)][keyCoinType]);
             }
         }
         bool legacy = selector == IAddrResolver.addr.selector;
         bool isAddr = legacy || selector == IAddressResolver.addr.selector;
         uint256 coinType = isAddr && !legacy ? uint256(bytes32(data[36:68])) : COIN_TYPE_ETH;
-        if (isAddr && ctx.urls.length > 0 && ENSIP19.isEVMCoinType(coinType)) {
+        if (isAddr && c.gatewayURLs.length > 0 && ENSIP19.isEVMCoinType(coinType)) {
             _checkNode(name, data);
             revert OffchainLookup(
                 address(this),
-                ctx.urls,
+                c.gatewayURLs,
                 abi.encodeCall(IExtendedResolver.resolve, (name, data)),
                 this.resolveStealthCallback.selector,
                 abi.encode(name, coinType, legacy)
             );
         }
-        if (ctx.recordsResolver == address(0)) {
-            // No records anywhere: unset address records, as standard ENS semantics (Section 4).
+        address recordsResolver = c.recordsResolver;
+        if (recordsResolver == address(0)) {
+            // No records resolver: unset address records, as standard ENS semantics (Section 4).
             if (legacy) return abi.encode(address(0));
             if (isAddr) return abi.encode(bytes(""));
             revert IUniversalResolver.UnsupportedResolverProfile(selector);
         }
-        return callResolver(
-            ctx.recordsResolver, name, data, false, "", BATCH_GATEWAY_PROVIDER.gateways()
-        );
+        return
+            callResolver(recordsResolver, name, data, false, "", BATCH_GATEWAY_PROVIDER.gateways());
     }
 
     /// @dev `resolve(name, multicall(calls))`: every call resolved as a single `resolve()` on this
@@ -426,18 +433,12 @@ contract StealthResolver is
 
     /// @dev Walks `name` through the ENSv2 registry from the leaf up. The authority is the nearest
     ///      registered name at or above the leaf, top-level names excluded (their parent is the
-    ///      root registry). With `withConfig`, also the effective config: per field, the value set
-    ///      by the nearest registered name that set it.
-    function _context(bytes memory name, bool withConfig)
-        internal
-        view
-        returns (NameState memory ctx)
-    {
+    ///      root registry). Its config and records are the name's; nothing is read further up.
+    function _context(bytes memory name) internal view returns (NameState memory ctx) {
         // registries[i]: the subregistry of the name at label i (leaf = 0); the last entry is the
         // root registry. Label i sits in registries[i + 1].
         IRegistry[] memory registries = LibRegistry.findRegistries(ROOT_REGISTRY, name, 0);
         uint256 offset;
-        bool haveUrls;
         for (uint256 i; i + 2 < registries.length; ++i) {
             (bytes32 labelHash, uint256 next) = NameCoder.readLabel(name, offset);
             offset = next;
@@ -445,21 +446,11 @@ contract StealthResolver is
             if (address(parent) == address(0)) continue;
             (bool registered, uint256 resource) = _registered(parent, labelHash);
             if (!registered) continue;
-            bytes32 key = keccak256(abi.encode(parent, resource));
-            if (ctx.key == bytes32(0)) {
-                ctx.key = key;
-                ctx.registry = IPermissionedRegistry(address(parent));
-                ctx.resource = resource;
-                ctx.exact = i == 0;
-                if (!withConfig) break;
-            }
-            Config storage c = _configs[key];
-            if (ctx.recordsResolver == address(0)) ctx.recordsResolver = c.recordsResolver;
-            if (!haveUrls && c.gatewayURLs.length > 0) {
-                ctx.urls = c.gatewayURLs;
-                haveUrls = true;
-            }
-            if (ctx.recordsResolver != address(0) && haveUrls) break;
+            ctx.key = keccak256(abi.encode(parent, resource));
+            ctx.registry = IPermissionedRegistry(address(parent));
+            ctx.resource = resource;
+            ctx.exact = i == 0;
+            break;
         }
     }
 

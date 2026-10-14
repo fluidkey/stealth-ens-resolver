@@ -146,6 +146,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
     }
 
     function test_verified_recordAddedBetweenLookupAndCallback() public {
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), STEALTH_GW);
         EIP3668.Params memory p = _lookup("alice.fkey.eth");
         setRecord(alice, "alice.fkey.eth", COIN_ETH, META);
         (bool ok,) = callback(p, abi.encode(makeAddr("attacker"), VD));
@@ -164,6 +165,18 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         (ok, v) = callback(_lookup("bob.fkey.eth"), abi.encode(address(0), bytes("ok")));
         assertTrue(ok);
         assertEq(_resolved(v), address(0));
+    }
+
+    /// @dev A registered name without gateway URLs is never sent to an ancestor's gateway: its
+    ///      static address is forwarded, even though fkey.eth has a gateway.
+    function test_registeredNameDoesNotInheritGateway() public {
+        address aliceStatic = makeAddr("aliceStatic");
+        vm.prank(alice);
+        aliceRecords.setAddr(aliceNode, aliceStatic);
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
+        bytes memory v =
+            resolver.resolve(dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode)));
+        assertEq(abi.decode(v, (address)), aliceStatic);
     }
 
     function test_unverified_wildcardReturnsGatewayAddress() public {
@@ -250,6 +263,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
             RegistryRolesLib.ROLE_SET_RESOLVER,
             expiry
         );
+        setConfig(carol, "carol.fkey.eth", address(0), STEALTH_GW);
         address any = makeAddr("any");
         (bool ok, bytes memory v) = callback(_lookup("carol.fkey.eth"), abi.encode(any, VD));
         assertTrue(ok);
@@ -266,6 +280,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
 
     /// @dev Two levels: sub.alice.fkey.eth is written by alice and takes fkey.eth's URLs.
     function test_wildcardRecord_twoLevels() public {
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), STEALTH_GW);
         setRecord(alice, "sub.alice.fkey.eth", COIN_ETH, META);
         EIP3668.Params memory p = _lookup("sub.alice.fkey.eth");
         assertEq(p.urls[0], STEALTH_GW);
@@ -309,6 +324,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
 
     /// @dev Scheme-specific shape is the verifier's to check, when verifying (fail closed).
     function test_badLengthRejectedByVerifier() public {
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), STEALTH_GW);
         setRecord(alice, "alice.fkey.eth", COIN_ETH, hex"01aabb");
         (bool ok, bytes memory v) =
             callback(_lookup("alice.fkey.eth"), abi.encode(makeAddr("any"), VD));
