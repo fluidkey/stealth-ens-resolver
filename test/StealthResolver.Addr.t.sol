@@ -5,10 +5,11 @@ import {EIP3668} from "@ens/contracts/ccipRead/EIP3668.sol";
 import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol";
 import {IAddressResolver} from "@ens/contracts/resolvers/profiles/IAddressResolver.sol";
 import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol";
-import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol";
 import {IExtendedResolver} from "@ens/contracts/resolvers/profiles/IExtendedResolver.sol";
 import {IRegistry} from "~src/registry/interfaces/IRegistry.sol";
 import {RegistryRolesLib} from "~src/registry/libraries/RegistryRolesLib.sol";
+
+import {IStealthResolver} from "../src/interfaces/IStealthResolver.sol";
 
 import {StealthResolver} from "../src/StealthResolver.sol";
 import {MockOffchainRecords} from "./mocks/MockOffchainRecords.sol";
@@ -428,6 +429,37 @@ contract StealthResolverAddrTest is StealthResolverFixture {
     function test_verifyStealthResolution_wildcardName() public {
         _setBobRecord();
         assertEq(resolver.verifyStealthResolution(bobNode, COIN_ETH, _derived(), VD), _derived());
+    }
+
+    /// @dev Through `resolve()` the record is located by name, as for every other query.
+    function test_verifyThroughResolve() public {
+        _setBobRecord();
+        address derived = _derived();
+        bytes memory call = abi.encodeCall(
+            IStealthResolver.verifyStealthResolution, (bobNode, COIN_ETH, derived, VD)
+        );
+        bytes memory v = resolver.resolve(dns("bob.fkey.eth"), call);
+        assertEq(abi.decode(v, (address)), derived);
+
+        call = abi.encodeCall(
+            IStealthResolver.verifyStealthResolution, (bobNode, COIN_ETH, address(0xBAD), VD)
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                StealthResolver.StealthAddressMismatch.selector, address(0xBAD), derived
+            )
+        );
+        resolver.resolve(dns("bob.fkey.eth"), call);
+    }
+
+    function test_verifyThroughResolve_nodeMustMatchName() public {
+        bytes memory call = abi.encodeCall(
+            IStealthResolver.verifyStealthResolution, (aliceNode, COIN_ETH, address(1), VD)
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NodeMismatch.selector, aliceNode, bobNode)
+        );
+        resolver.resolve(dns("bob.fkey.eth"), call);
     }
 
     function test_verifyStealthResolution_missingRecordReverts() public {

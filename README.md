@@ -45,6 +45,7 @@ registered ancestor. Nothing is inherited past a registered name.
 | Any other record | Forwarded to the records resolver, including offchain ones. |
 | `resolve(name, multicall(...))` | Answered as one batch (ERC-7996 `RESOLVE_MULTICALL`). |
 | `gatewayURLs(node)` | N's own URLs; through `resolve()`, its authority's. |
+| `verifyStealthResolution(node, coinType, address, verificationData)` | Through `resolve()`: verified against N's record, located by name like every other query (wildcard names included, no lag after re-registration). Called directly: see Re-registration. |
 | `getResolver(name)` (`ICompositeResolver`) | The records resolver, so apps know where to edit other records. |
 
 **The record served is the record verified**, for every name, wildcard names included. Only the
@@ -106,10 +107,12 @@ holder of `ROLE_SET_RESOLVER` on it.
 **Re-registration.** State is keyed by the authority's ENSv2 resource, which the registry renews
 when an expired name is registered again, to anyone. `resolve()` therefore never reads a previous
 holder's config or records, and the new holder starts empty. An expired name that is not registered
-again resolves as a wildcard name of its parent. `gatewayURLs(node)` and
-`verifyStealthResolution(node, ...)` take a node, which cannot be walked through the registry: they
-read the state last written for that node and so see the previous holder's state until the new
-holder writes.
+again resolves as a wildcard name of its parent. Called directly, `gatewayURLs(node)` and
+`verifyStealthResolution(node, ...)` have only a node, which cannot be walked through the registry:
+they read the state last written for that node and so see the previous holder's state until the new
+holder writes. Query them through `resolve(name, data)`, directly or through the UniversalResolver,
+to have them answered by name; out-of-flow verifiers and contracts consuming stealth resolutions
+should do so (no CCIP-Read is involved).
 
 ### Setting up a name for verified resolution
 
@@ -139,7 +142,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 20,683 | 3,893 |
+| `StealthResolver` | 20,786 | 3,790 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
 `eth_call` costs; verified-mode numbers use a mock verifier and exclude the scheme's curve arithmetic.
@@ -148,12 +151,12 @@ read cost.
 
 | Path | Gas |
 |---|---|
-| `resolve` wildcard name, address, `OffchainLookup` revert | 40,748 |
-| `resolve` registered name, address, `OffchainLookup` revert | 23,147 |
-| `resolveStealthCallback`, unverified (wildcard name) | 44,027 + verifier |
-| `resolveStealthCallback`, verified (registered name) | 28,355 + verifier |
-| `verifyStealthResolution` | 6,928 + verifier |
-| `resolve` text, forwarded to a `PermissionedResolver` | 61,167 |
+| `resolve` wildcard name, address, `OffchainLookup` revert | 40,792 |
+| `resolve` registered name, address, `OffchainLookup` revert | 23,191 |
+| `resolveStealthCallback`, unverified (wildcard name) | 43,675 + verifier |
+| `resolveStealthCallback`, verified (registered name) | 29,100 + verifier |
+| `verifyStealthResolution` | 6,991 + verifier |
+| `resolve` text, forwarded to a `PermissionedResolver` | 61,211 |
 | `text` on the `PermissionedResolver` directly (reference) | 3,261 |
 | `setConfig`, records resolver and one URL (transaction) | 163,076 |
 | `setChains`, one chain (transaction) | 88,931 |

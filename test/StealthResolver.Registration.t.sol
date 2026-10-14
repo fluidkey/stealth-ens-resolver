@@ -8,6 +8,7 @@ import {IRegistry} from "~src/registry/interfaces/IRegistry.sol";
 import {RegistryRolesLib} from "~src/registry/libraries/RegistryRolesLib.sol";
 
 import {StealthResolver} from "../src/StealthResolver.sol";
+import {IStealthResolver} from "../src/interfaces/IStealthResolver.sol";
 import {StealthResolverFixture} from "./utils/StealthResolverFixture.sol";
 
 /// @dev State belongs to a registration: ENSv2 renews a name's EAC resource when an expired name is
@@ -83,6 +84,15 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
         _reregisterAlice(carol);
         assertEq(resolver.verifyStealthResolution(aliceNode, COIN_ETH, derived, VD), derived);
         assertEq(resolver.gatewayURLs(aliceNode)[0], "https://alice.gw");
+
+        // Through resolve() the name is known: no lag.
+        bytes memory call = abi.encodeCall(
+            IStealthResolver.verifyStealthResolution, (aliceNode, COIN_ETH, derived, VD)
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NoStealthRecord.selector, aliceNode, COIN_ETH)
+        );
+        resolver.resolve(dns("alice.fkey.eth"), call);
 
         setMeta(carol, "alice.fkey.eth", "");
         setConfig(carol, "alice.fkey.eth", address(0), "");

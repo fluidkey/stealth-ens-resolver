@@ -8,6 +8,7 @@ import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol
 import {ITextResolver} from "@ens/contracts/resolvers/profiles/ITextResolver.sol";
 
 import {StealthResolver} from "../src/StealthResolver.sol";
+import {IStealthResolver} from "../src/interfaces/IStealthResolver.sol";
 import {MockOffchainRecords} from "./mocks/MockOffchainRecords.sol";
 import {StealthResolverFixture} from "./utils/StealthResolverFixture.sol";
 
@@ -35,6 +36,30 @@ contract StealthResolverE2ETest is StealthResolverFixture {
             (result, resolvedBy) = abi.decode(v, (bytes, address));
             assertEq(resolvedBy, address(resolver), "resolved by StealthResolver");
         }
+    }
+
+    /// @dev Out-of-flow verification of a wildcard name's past resolution, through the
+    ///      UniversalResolver: located by name, no CCIP-Read needed.
+    function test_ur_verifyStealthResolution() public {
+        vm.prank(fluidkey);
+        resolver.setMetaAddress(dns("bob.fkey.eth"), META);
+        address derived = verifier.derive(metaWithoutFlag(), VD);
+        (bool ok, bytes memory result) = _ur(
+            "bob.fkey.eth",
+            abi.encodeCall(
+                IStealthResolver.verifyStealthResolution, (bobNode, COIN_ETH, derived, VD)
+            )
+        );
+        assertTrue(ok);
+        assertEq(abi.decode(result, (address)), derived);
+
+        (ok,) = _ur(
+            "bob.fkey.eth",
+            abi.encodeCall(
+                IStealthResolver.verifyStealthResolution, (bobNode, COIN_ETH, address(0xBAD), VD)
+            )
+        );
+        assertFalse(ok, "mismatch reverts");
     }
 
     // resolve(name, multicall(...)) batches.

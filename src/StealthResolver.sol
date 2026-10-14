@@ -323,19 +323,21 @@ contract StealthResolver is
     }
 
     /// @inheritdoc IStealthResolver
-    /// @dev ENSIP-30 Section 5. The meta-address last written for `node`, wildcard names included,
-    ///      if `coinType` is on the chain list of its writer. A node cannot be walked through the
-    ///      registry, so after a re-registration this verifies against the previous holder's record
-    ///      until the new holder writes; `resolve()` and the callback never do.
+    /// @dev ENSIP-30 Section 5. Prefer querying it through ENSIP-10 `resolve(name, data)` (directly
+    ///      or through the UniversalResolver): there the record is located by name, as for every
+    ///      other query. Called directly, only the node is known, which cannot be walked through the
+    ///      registry: this reads the meta-address last written for `node` (wildcard names
+    ///      included), if `coinType` is on the chain list of its writer, so after a re-registration
+    ///      it verifies against the previous holder's record until the new holder writes.
     function verifyStealthResolution(
         bytes32 node,
         uint256 coinType,
         address stealthAddress,
         bytes calldata verificationData
     ) external view returns (address) {
-        bytes memory record = _record(_metaAddressKeys[node], node, coinType);
-        if (record.length == 0) revert NoStealthRecord(node, coinType);
-        return _verify(node, coinType, record, verificationData, stealthAddress);
+        return _verifyResolution(
+            _metaAddressKeys[node], node, coinType, stealthAddress, verificationData
+        );
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -380,10 +382,9 @@ contract StealthResolver is
         bytes32 node = NameCoder.namehash(name, 0);
         bytes32 key = _context(name).key;
         if (!_isStealth(key, coinType)) revert ChainNotStealth(coinType);
-        bytes memory record = _metaAddresses[key][node];
-        address resolved = record.length == 0
+        address resolved = _metaAddresses[key][node].length == 0
             ? VERIFIER.verify(node, coinType, "", verificationData, claimed)
-            : _verify(node, coinType, record, verificationData, claimed);
+            : _verifyResolution(key, node, coinType, claimed, verificationData);
         if (legacy) return abi.encode(resolved);
         return abi.encode(resolved == address(0) ? bytes("") : abi.encodePacked(resolved));
     }
@@ -418,6 +419,15 @@ contract StealthResolver is
         if (selector == IStealthResolver.gatewayURLs.selector) {
             _checkNode(name, data);
             return abi.encode(c.gatewayURLs);
+        }
+        if (selector == IStealthResolver.verifyStealthResolution.selector) {
+            (, uint256 vCoinType, address stealthAddress, bytes memory verificationData) =
+                abi.decode(data[4:], (bytes32, uint256, address, bytes));
+            return abi.encode(
+                _verifyResolution(
+                    ctx.key, _checkNode(name, data), vCoinType, stealthAddress, verificationData
+                )
+            );
         }
         if (selector == IDataResolver.data.selector) {
             (, string memory key) = abi.decode(data[4:], (bytes32, string));
@@ -538,6 +548,21 @@ contract StealthResolver is
         bytes32 node = NameCoder.namehash(name, 0);
         if (bytes32(data[4:36]) != node) revert NodeMismatch(bytes32(data[4:36]), node);
         return node;
+    }
+
+    /// @dev `verifyStealthResolution` under the authority `key`, shared by the direct function, the
+    ///      `resolve()` path and the callback's verified mode (ENSIP-30 Section 4: the callback is a
+    ///      thin wrapper over it).
+    function _verifyResolution(
+        bytes32 key,
+        bytes32 node,
+        uint256 coinType,
+        address stealthAddress,
+        bytes memory verificationData
+    ) internal view returns (address) {
+        bytes memory record = _record(key, node, coinType);
+        if (record.length == 0) revert NoStealthRecord(node, coinType);
+        return _verify(node, coinType, record, verificationData, stealthAddress);
     }
 
     /// @dev Verified mode: the verifier rederives from the record (well formed, checked when
