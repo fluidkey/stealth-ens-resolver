@@ -105,6 +105,45 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         assertFalse(legacy);
     }
 
+    /// @dev A listed default is stealth for queries for the default itself; a chain that is not
+    ///      listed does not fall back to it.
+    function test_defaultCoinType_listedIsStealthNoFallback() public {
+        setChain(fluidkey, "fkey.eth", 0x80000000, true);
+        (, uint256 coinType,,) = abi.decode(
+            _lookupCoin("bob.fkey.eth", 0x80000000).extraData, (bytes, uint256, bool, bytes32)
+        );
+        assertEq(coinType, 0x80000000);
+        uint256 polygon = 0x80000089;
+        assertFalse(resolver.isStealthChain(dns("bob.fkey.eth"), polygon), "no fallback");
+        vm.prank(fluidkey);
+        fkeyRecords.setAddress(dns("bob.fkey.eth"), polygon, abi.encodePacked(address(0xBEEF)));
+        bytes memory v = resolver.resolve(
+            dns("bob.fkey.eth"), abi.encodeCall(IAddressResolver.addr, (bobNode, polygon))
+        );
+        assertEq(abi.decode(v, (bytes)), abi.encodePacked(address(0xBEEF)), "static");
+    }
+
+    /// @dev `0x80000001` is Ethereum in ENSIP-11 form: answered as 60, and the gateway is asked
+    ///      for 60, so chain 1 has one stealth coin type and one record.
+    function test_ethereumAlias_answeredAs60() public {
+        setUpAliceVerified(COIN_ETH);
+        EIP3668.Params memory p = _lookupCoin("alice.fkey.eth", 0x80000001);
+        (, uint256 coinType,,) = abi.decode(p.extraData, (bytes, uint256, bool, bytes32));
+        assertEq(coinType, COIN_ETH);
+        assertEq(
+            p.callData,
+            abi.encodeCall(
+                IExtendedResolver.resolve,
+                (
+                    dns("alice.fkey.eth"),
+                    abi.encodeCall(IAddressResolver.addr, (aliceNode, COIN_ETH))
+                )
+            )
+        );
+        assertTrue(resolver.isStealthChain(dns("alice.fkey.eth"), 0x80000001));
+        assertEq(_data(aliceNode, 0x80000001), META, "the record of 60");
+    }
+
     function test_ownGatewayWinsOverInherited() public {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "https://alice.gw");
         setChain(alice, "alice.fkey.eth", COIN_ETH, true);

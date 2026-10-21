@@ -58,6 +58,14 @@ and is ignored.
 key material once and exposing it under each coin type enabled for the name). Only EVM coin types can
 be listed, since the verifier answers with an EVM address. A name is stealth on listed chains and
 keeps its static address on all others, so stealth on Base and static on Ethereum is one list entry.
+The ENSIP-19 default coin type (`0x80000000`) can be listed too, as an opt-in: a query for the
+default then goes to the gateway, so the recipient must detect payments on any EVM chain, and a
+chain that is not listed still never falls back to it. This departs from the ENSIP draft, which
+allows only ENSIP-11 coin types, and is raised against it. `0x80000001`, Ethereum in ENSIP-11 form,
+is answered as 60 (its record, its gateway path) and cannot be listed. A records resolver that
+holds an ENSIP-19 default address answers every chain without its own record, listed ones queried
+under the default included unless the default is listed: keep no default record on a name with
+listed chains.
 Removing a chain falls back to the static address, never to unverified resolution: a lookup in
 flight when the chain or the gateway is removed is rejected (`ChainNotStealth`). A lookup is also
 bound to the authority and gateway URLs it was sent to, as ENS's UniversalResolver sends each
@@ -289,7 +297,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 21,735 | 2,841 |
+| `StealthResolver` | 21,950 | 2,626 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
 | `FluidkeyVerifier` | 5,801 | 18,775 |
 | `FluidkeySigners` | 894 | 23,682 |
@@ -302,18 +310,18 @@ read cost.
 
 | Path | Gas |
 |---|---|
-| `resolve` wildcard name, address, `OffchainLookup` revert | 44,383 |
-| `resolve` registered name, address, `OffchainLookup` revert | 24,782 |
+| `resolve` wildcard name, address, `OffchainLookup` revert | 44,771 |
+| `resolve` registered name, address, `OffchainLookup` revert | 25,170 |
 | `resolveStealthCallback`, unverified (wildcard name) | 49,260 + verifier |
 | `resolveStealthCallback`, verified (registered name) | 30,685 + verifier |
-| `resolve` registered name, `verifyStealthResolution` | 27,250 + verifier |
+| `resolve` registered name, `verifyStealthResolution` | 27,323 + verifier |
 | `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,122 |
 | `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,622 |
 | `FluidkeyVerifier.verify`, unverified mode, signed | 14,906 |
-| `resolve` text, forwarded to a `PermissionedResolver` | 43,712 |
+| `resolve` text, forwarded to a `PermissionedResolver` | 43,801 |
 | `resolve` text on the `PermissionedResolver` directly (reference) | 6,426 |
 | `setConfig`, records resolver and one URL (transaction) | 143,394 |
-| `setChains`, one chain (transaction) | 91,397 |
+| `setChains`, one chain (transaction) | 91,431 |
 | `setMetaAddress`, 67-byte scheme-1 record (transaction) | 158,924 |
 
 ## Build and test

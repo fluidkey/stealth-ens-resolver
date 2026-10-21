@@ -244,6 +244,17 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         resolver.setChains(dns("alice.fkey.eth"), coinTypes, true);
     }
 
+    /// @dev The ENSIP-19 default may be listed; `0x80000001`, Ethereum in ENSIP-11 form, may not:
+    ///      it is answered as 60.
+    function test_setChains_defaultListedAliasRejected() public {
+        setChain(alice, "alice.fkey.eth", 0x80000000, true);
+        uint256[] memory coinTypes = new uint256[](1);
+        coinTypes[0] = 0x80000001;
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(StealthResolver.InvalidChain.selector, 0x80000001));
+        resolver.setChains(dns("alice.fkey.eth"), coinTypes, true);
+    }
+
     function test_setConfig_expiredNameReverts() public {
         vm.warp(expiry);
         assertFalse(resolver.canSetConfig(dns("alice.fkey.eth"), alice));

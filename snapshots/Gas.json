@@ -5,11 +5,11 @@
   "Scheme1Verifier_verify": "16122",
   "resolveStealthCallback_unverified": "49260",
   "resolveStealthCallback_verified_mockVerifier": "30685",
-  "resolve_forwardedText_PermissionedResolver": "43712",
-  "resolve_registeredAddr_offchainLookup": "24782",
-  "resolve_verifyStealthResolution_mockVerifier": "27250",
-  "resolve_wildcardAddr_offchainLookup": "44383",
-  "setChains_oneChain": "91397",
+  "resolve_forwardedText_PermissionedResolver": "43801",
+  "resolve_registeredAddr_offchainLookup": "25170",
+  "resolve_verifyStealthResolution_mockVerifier": "27323",
+  "resolve_wildcardAddr_offchainLookup": "44771",
+  "setChains_oneChain": "91431",
   "setConfig_recordsResolver_oneUrl": "143394",
   "setMetaAddress_67bytes": "158924"
 }

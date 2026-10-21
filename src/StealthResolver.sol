@@ -14,7 +14,7 @@ import {IExtendedResolver} from "@ens/contracts/resolvers/profiles/IExtendedReso
 import {IUniversalResolver} from "@ens/contracts/universalResolver/IUniversalResolver.sol";
 import {ResolverCaller} from "@ens/contracts/universalResolver/ResolverCaller.sol";
 import {BytesUtils} from "@ens/contracts/utils/BytesUtils.sol";
-import {COIN_TYPE_ETH, ENSIP19} from "@ens/contracts/utils/ENSIP19.sol";
+import {COIN_TYPE_DEFAULT, COIN_TYPE_ETH, ENSIP19} from "@ens/contracts/utils/ENSIP19.sol";
 import {IERC7996} from "@ens/contracts/utils/IERC7996.sol";
 import {NameCoder} from "@ens/contracts/utils/NameCoder.sol";
 import {IPermissionedRegistry} from "@ensv2/registry/interfaces/IPermissionedRegistry.sol";
@@ -238,9 +238,12 @@ contract StealthResolver is
     ///      (wildcard) names below it are stealth: an address query for a listed coin type goes to
     ///      the gateway, verified if the name has a meta-address; any other coin type is forwarded
     ///      to the records resolver. `data()` serves the meta-address record only for listed coin
-    ///      types. Same authority as `setConfig`.
+    ///      types. The ENSIP-19 default coin type may be listed: queries for it then go to the
+    ///      gateway too, while a chain that is not listed never falls back to it. `0x80000001` is
+    ///      Ethereum in ENSIP-11 form and is answered as 60, so it cannot be listed. Same authority
+    ///      as `setConfig`.
     /// @param name The DNS-encoded name.
-    /// @param coinTypes ENSIP-11 EVM coin types.
+    /// @param coinTypes ENSIP-11 EVM coin types, or the ENSIP-19 default.
     /// @param enabled Add (true) or remove (false).
     function setChains(bytes calldata name, uint256[] calldata coinTypes, bool enabled) external {
         NameState memory ctx = _context(name);
@@ -248,7 +251,9 @@ contract StealthResolver is
         bytes32 node = NameCoder.namehash(name, 0);
         for (uint256 i; i < coinTypes.length; ++i) {
             uint256 coinType = coinTypes[i];
-            if (!ENSIP19.isEVMCoinType(coinType)) revert InvalidChain(coinType);
+            if (!ENSIP19.isEVMCoinType(coinType) || coinType == COIN_TYPE_DEFAULT | 1) {
+                revert InvalidChain(coinType);
+            }
             _chains[ctx.key][coinType] = enabled;
             emit ChainChanged(node, name, coinType, enabled);
         }
@@ -330,7 +335,7 @@ contract StealthResolver is
     /// @dev ENSIP-30 Section 2: the per-coin-type form of "gateway-based resolution is configured
     ///      for the name". Whether it is verified is told by the Section 1 record.
     function isStealthChain(bytes calldata name, uint256 coinType) external view returns (bool) {
-        return _isStealth(_context(name).key, coinType);
+        return _isStealth(_context(name).key, _chainCoinType(coinType));
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -470,7 +475,11 @@ contract StealthResolver is
                 abi.decode(data[4:], (bytes32, uint256, address, bytes));
             return abi.encode(
                 _verifyResolution(
-                    ctx.key, _checkNode(name, data), vCoinType, stealthAddress, verificationData
+                    ctx.key,
+                    _checkNode(name, data),
+                    _chainCoinType(vCoinType),
+                    stealthAddress,
+                    verificationData
                 )
             );
         }
@@ -478,21 +487,17 @@ contract StealthResolver is
             (, string memory key) = abi.decode(data[4:], (bytes32, string));
             (bool isStealthKey, uint256 keyCoinType) = _parseStealthKey(key);
             if (isStealthKey) {
-                return abi.encode(_record(ctx.key, _checkNode(name, data), keyCoinType));
+                return abi.encode(
+                    _record(ctx.key, _checkNode(name, data), _chainCoinType(keyCoinType))
+                );
             }
         }
         bool legacy = selector == IAddrResolver.addr.selector;
         bool isAddr = legacy || selector == IAddressResolver.addr.selector;
-        uint256 coinType = isAddr && !legacy ? uint256(bytes32(data[36:68])) : COIN_TYPE_ETH;
+        uint256 queried = isAddr && !legacy ? uint256(bytes32(data[36:68])) : COIN_TYPE_ETH;
+        uint256 coinType = _chainCoinType(queried);
         if (isAddr && _isStealth(ctx.key, coinType)) {
-            _checkNode(name, data);
-            revert OffchainLookup(
-                address(this),
-                c.gatewayURLs,
-                abi.encodeCall(IExtendedResolver.resolve, (name, data)),
-                this.resolveStealthCallback.selector,
-                abi.encode(name, coinType, legacy, _lookupBinding(ctx.key))
-            );
+            _stealthLookup(name, data, ctx.key, coinType, coinType != queried, legacy);
         }
         address recordsResolver = c.recordsResolver;
         if (recordsResolver == address(0)) {
@@ -503,6 +508,28 @@ contract StealthResolver is
         }
         return
             callResolver(recordsResolver, name, data, false, "", BATCH_GATEWAY_PROVIDER.gateways());
+    }
+
+    /// @dev ENSIP-30 Section 4, step 1: the `OffchainLookup` to the gateway of the authority `key`.
+    ///      An aliased query (`0x80000001`) reaches the gateway as the coin type answered, 60.
+    function _stealthLookup(
+        bytes calldata name,
+        bytes calldata data,
+        bytes32 key,
+        uint256 coinType,
+        bool aliased,
+        bool legacy
+    ) internal view {
+        bytes32 node = _checkNode(name, data);
+        bytes memory query = data;
+        if (aliased) query = abi.encodeCall(IAddressResolver.addr, (node, coinType));
+        revert OffchainLookup(
+            address(this),
+            _configs[key].gatewayURLs,
+            abi.encodeCall(IExtendedResolver.resolve, (name, query)),
+            this.resolveStealthCallback.selector,
+            abi.encode(name, coinType, legacy, _lookupBinding(key))
+        );
     }
 
     /// @dev `resolve(name, multicall(calls))` and the `multicallWithNodeCheck` form: every call
@@ -577,6 +604,12 @@ contract StealthResolver is
     ///      item without checking the error marker would read an address it chose.
     function _isSafeBatchGatewayError(bytes4) internal pure override returns (bool) {
         return false;
+    }
+
+    /// @dev Ethereum's coin type for its ENSIP-11 alias `0x80000001`, otherwise `coinType`, so that
+    ///      chain 1 has one chain-list entry and one record.
+    function _chainCoinType(uint256 coinType) internal pure returns (uint256) {
+        return coinType == COIN_TYPE_DEFAULT | 1 ? COIN_TYPE_ETH : coinType;
     }
 
     /// @dev What a lookup is bound to: the authority `key` and the gateway URLs it was sent to.
