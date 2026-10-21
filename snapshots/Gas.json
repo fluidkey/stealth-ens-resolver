@@ -3,13 +3,13 @@
   "FluidkeyVerifier_verify_verified": "27709",
   "PermissionedResolver_resolveText_direct_reference": "6425",
   "Scheme1Verifier_verify": "16122",
-  "resolveStealthCallback_unverified": "43765",
-  "resolveStealthCallback_verified_mockVerifier": "29191",
-  "resolve_forwardedText_PermissionedResolver": "43378",
-  "resolve_registeredAddr_offchainLookup": "23330",
-  "resolve_verifyStealthResolution_mockVerifier": "26918",
-  "resolve_wildcardAddr_offchainLookup": "40930",
-  "setChains_oneChain": "89043",
-  "setConfig_recordsResolver_oneUrl": "140996",
-  "setMetaAddress_67bytes": "156525"
+  "resolveStealthCallback_unverified": "43769",
+  "resolveStealthCallback_verified_mockVerifier": "29193",
+  "resolve_forwardedText_PermissionedResolver": "43382",
+  "resolve_registeredAddr_offchainLookup": "23332",
+  "resolve_verifyStealthResolution_mockVerifier": "26920",
+  "resolve_wildcardAddr_offchainLookup": "40934",
+  "setChains_oneChain": "89045",
+  "setConfig_recordsResolver_oneUrl": "140998",
+  "setMetaAddress_67bytes": "156527"
 }

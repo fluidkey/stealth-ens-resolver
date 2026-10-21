@@ -43,8 +43,9 @@ import {IStealthVerifier} from "./interfaces/IStealthVerifier.sol";
 ///      Authority. All state is written under the ENSv2 rule for setting a name's resolver
 ///      (`ROLE_SET_RESOLVER` on the name's token, not expired), applied to the nearest registered
 ///      name at or above the name written: a registered name writes its own state, an
-///      unregistered (wildcard) name's record is written by its nearest registered ancestor. State
-///      is keyed by that authority's registry resource, which ENSv2 renews when an expired name is
+///      unregistered (wildcard) name's record is written by its nearest registered ancestor. A
+///      reserved name counts as registered: it exists in the registry in its own right. State is
+///      keyed by that authority's registry resource, which ENSv2 renews when an expired name is
 ///      registered again, so a previous holder's state is never read.
 ///
 ///      Per query for a DNS-encoded name N, with the config of N's authority (nothing is inherited
@@ -82,7 +83,7 @@ contract StealthResolver is
         IPermissionedRegistry registry;
         /// @dev The authority's EAC resource in `registry`.
         uint256 resource;
-        /// @dev The authority is the name itself (the name is registered).
+        /// @dev The authority is the name itself (the name is registered or reserved).
         bool exact;
     }
 
@@ -505,9 +506,12 @@ contract StealthResolver is
         }
     }
 
-    /// @dev Whether `labelHash` is registered (not reserved, not expired) in `registry`, and its
-    ///      EAC resource. ENSv2 renews the resource when an expired name is registered again.
-    ///      A registry that is not a `PermissionedRegistry` registers nothing here.
+    /// @dev Whether `labelHash` is registered or reserved (not expired) in `registry`, and its EAC
+    ///      resource. A reserved name has no token: its resolver, and so its state, is set by
+    ///      whoever holds `ROLE_SET_RESOLVER` registry-wide, never by its parent's holder. ENSv2
+    ///      renews the resource when an expired name is registered again, but not when a reserved
+    ///      one is registered. A registry that is not a `PermissionedRegistry` registers nothing
+    ///      here.
     function _registered(IRegistry registry, bytes32 labelHash)
         internal
         view
@@ -519,7 +523,7 @@ contract StealthResolver is
         if (!ok || v.length < 160) return (false, 0);
         uint256 status;
         (status,,,, resource) = abi.decode(v, (uint256, uint256, uint256, uint256, uint256));
-        registered = status == uint256(IPermissionedRegistry.Status.REGISTERED);
+        registered = status != uint256(IPermissionedRegistry.Status.AVAILABLE);
     }
 
     /// @dev Whether address queries for `coinType` go to the gateway under the authority `key`:

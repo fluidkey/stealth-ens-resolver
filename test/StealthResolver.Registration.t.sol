@@ -4,6 +4,7 @@ pragma solidity 0.8.25;
 import {EIP3668} from "@ens/contracts/ccipRead/EIP3668.sol";
 import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol";
 import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol";
+import {UserRegistry} from "~src/registry/UserRegistry.sol";
 import {IRegistry} from "~src/registry/interfaces/IRegistry.sol";
 import {RegistryRolesLib} from "~src/registry/libraries/RegistryRolesLib.sol";
 
@@ -111,6 +112,49 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
         assertEq(r, address(fkeyRecords));
         assertTrue(resolver.canSetMetaAddress(dns("alice.fkey.eth"), fluidkey));
         assertFalse(resolver.canSetMetaAddress(dns("alice.fkey.eth"), alice));
+    }
+
+    /// @dev A reserved name is its own authority, as ENSv2 treats it: written by whoever may set its
+    ///      resolver (registry-wide `ROLE_SET_RESOLVER`, as it has no token), never by its parent's
+    ///      holder, and it does not inherit the parent's gateway. Registering it keeps the resource,
+    ///      so what was written while it was reserved carries over.
+    function test_reservedName_isItsOwnAuthority() public {
+        address registrar = makeAddr("registrar");
+        address clubOwner = makeAddr("club owner");
+        UserRegistry clubRegistry = deployUserRegistry(
+            registrar,
+            RegistryRolesLib.ROLE_REGISTRAR | RegistryRolesLib.ROLE_REGISTER_RESERVED
+                | RegistryRolesLib.ROLE_SET_RESOLVER,
+            uint256(keccak256("club"))
+        );
+        ethRegistry.register(
+            "club", clubOwner, clubRegistry, address(resolver), _ethTokenRoles(), expiry
+        );
+        setConfig(clubOwner, "club.eth", address(0), STEALTH_GW);
+        setChain(clubOwner, "club.eth", COIN_ETH, true);
+        vm.prank(registrar);
+        clubRegistry.register(
+            "vip", address(0), IRegistry(address(0)), address(resolver), 0, expiry
+        );
+
+        assertFalse(resolver.canSetMetaAddress(dns("vip.club.eth"), clubOwner), "not the parent");
+        assertTrue(resolver.canSetConfig(dns("vip.club.eth"), registrar), "who sets its resolver");
+        assertTrue(resolver.canSetMetaAddress(dns("sub.vip.club.eth"), registrar), "and below");
+        assertFalse(resolver.isStealthChain(dns("vip.club.eth"), COIN_ETH), "no parent gateway");
+
+        setChain(registrar, "vip.club.eth", COIN_ETH, true);
+        setMeta(registrar, "vip.club.eth", META);
+        vm.prank(registrar);
+        clubRegistry.register(
+            "vip",
+            carol,
+            IRegistry(address(0)),
+            address(resolver),
+            RegistryRolesLib.ROLE_SET_RESOLVER,
+            0
+        );
+        assertTrue(resolver.canSetConfig(dns("vip.club.eth"), carol), "the registrant");
+        assertEq(_record("vip.club.eth"), META, "kept on registration");
     }
 
     /// @dev Role changes regenerate the token but keep the resource: state is kept.

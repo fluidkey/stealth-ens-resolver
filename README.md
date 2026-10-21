@@ -90,6 +90,10 @@ name's token, name not expired, the same check as `PermissionedRegistry.setResol
 the **authority** of a name, the nearest registered name at or above it. Top-level names are never an
 authority: their state would reach every name below them. A name in a registry that is not an ENSv2
 `PermissionedRegistry` counts as unregistered and takes its nearest registered ancestor as authority.
+A reserved name counts as registered, as ENSv2 treats it: it exists in the registry in its own right,
+so it is its own authority, written by whoever may set its resolver there (registry-wide
+`ROLE_SET_RESOLVER` holders, since it has no token yet) and never by its parent's holder.
+Registering it keeps its resource, and with it its state.
 
 | Function | Name | Written by |
 |---|---|---|
@@ -279,19 +283,19 @@ read cost.
 
 | Path | Gas |
 |---|---|
-| `resolve` wildcard name, address, `OffchainLookup` revert | 40,930 |
-| `resolve` registered name, address, `OffchainLookup` revert | 23,330 |
-| `resolveStealthCallback`, unverified (wildcard name) | 43,765 + verifier |
-| `resolveStealthCallback`, verified (registered name) | 29,191 + verifier |
-| `resolve` registered name, `verifyStealthResolution` | 26,918 + verifier |
+| `resolve` wildcard name, address, `OffchainLookup` revert | 40,934 |
+| `resolve` registered name, address, `OffchainLookup` revert | 23,332 |
+| `resolveStealthCallback`, unverified (wildcard name) | 43,769 + verifier |
+| `resolveStealthCallback`, verified (registered name) | 29,193 + verifier |
+| `resolve` registered name, `verifyStealthResolution` | 26,920 + verifier |
 | `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,122 |
 | `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,709 |
 | `FluidkeyVerifier.verify`, unverified mode, signed | 14,993 |
-| `resolve` text, forwarded to a `PermissionedResolver` | 43,378 |
+| `resolve` text, forwarded to a `PermissionedResolver` | 43,382 |
 | `resolve` text on the `PermissionedResolver` directly (reference) | 6,425 |
-| `setConfig`, records resolver and one URL (transaction) | 140,996 |
-| `setChains`, one chain (transaction) | 89,043 |
-| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 156,525 |
+| `setConfig`, records resolver and one URL (transaction) | 140,998 |
+| `setChains`, one chain (transaction) | 89,045 |
+| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 156,527 |
 
 ## Build and test
 
