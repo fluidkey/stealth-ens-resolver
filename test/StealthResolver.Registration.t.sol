@@ -116,8 +116,8 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
 
     /// @dev A reserved name is its own authority, as ENSv2 treats it: written by whoever may set its
     ///      resolver (registry-wide `ROLE_SET_RESOLVER`, as it has no token), never by its parent's
-    ///      holder, and it does not inherit the parent's gateway. Registering it keeps the resource,
-    ///      so what was written while it was reserved carries over.
+    ///      holder, and it does not inherit the parent's gateway. Registering it keeps the registry
+    ///      resource, but nothing written while it was reserved is read once it is registered.
     function test_reservedName_isItsOwnAuthority() public {
         address registrar = makeAddr("registrar");
         address clubOwner = makeAddr("club owner");
@@ -154,7 +154,49 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
             0
         );
         assertTrue(resolver.canSetConfig(dns("vip.club.eth"), carol), "the registrant");
-        assertEq(_record("vip.club.eth"), META, "kept on registration");
+        assertEq(_record("vip.club.eth"), "", "starts empty on registration");
+    }
+
+    /// @dev ENSv2 does not renew the resource of a label that was only ever reserved, so a fresh
+    ///      registration after the reservation lapsed would otherwise read the reservation-era
+    ///      state; it starts empty too.
+    function test_reservedName_lapsedReservationStartsEmpty() public {
+        address registrar = makeAddr("registrar");
+        UserRegistry clubRegistry = deployUserRegistry(
+            registrar,
+            RegistryRolesLib.ROLE_REGISTRAR | RegistryRolesLib.ROLE_SET_RESOLVER,
+            uint256(keccak256("club"))
+        );
+        ethRegistry.register(
+            "club",
+            makeAddr("club owner"),
+            clubRegistry,
+            address(resolver),
+            _ethTokenRoles(),
+            expiry
+        );
+        uint64 reservation = uint64(block.timestamp + 1 days);
+        vm.prank(registrar);
+        clubRegistry.register(
+            "vip", address(0), IRegistry(address(0)), address(resolver), 0, reservation
+        );
+        setConfig(registrar, "vip.club.eth", address(0), STEALTH_GW);
+        setChain(registrar, "vip.club.eth", COIN_ETH, true);
+        setMeta(registrar, "vip.club.eth", META);
+
+        vm.warp(reservation + 1);
+        vm.prank(registrar);
+        clubRegistry.register(
+            "vip",
+            carol,
+            IRegistry(address(0)),
+            address(resolver),
+            RegistryRolesLib.ROLE_SET_RESOLVER,
+            expiry
+        );
+        assertTrue(resolver.canSetConfig(dns("vip.club.eth"), carol), "the registrant");
+        assertEq(_record("vip.club.eth"), "", "starts empty");
+        assertFalse(isStealthChain("vip.club.eth", COIN_ETH), "no reservation-era gateway");
     }
 
     /// @dev A transfer keeps the state, as ENS's resolvers keep a name's records: the seller's

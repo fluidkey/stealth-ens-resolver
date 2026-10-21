@@ -112,8 +112,8 @@ authority: their state would reach every name below them. A name in a registry t
 `PermissionedRegistry` counts as unregistered and takes its nearest registered ancestor as authority.
 A reserved name counts as registered, as ENSv2 treats it: it exists in the registry in its own right,
 so it is its own authority, written by whoever may set its resolver there (registry-wide
-`ROLE_SET_RESOLVER` holders, since it has no token yet) and never by its parent's holder.
-Registering it keeps its resource, and with it its state.
+`ROLE_SET_RESOLVER` holders, since it has no token yet) and never by its parent's holder. Nothing
+written while it is reserved is read once it is registered: the registrant starts empty.
 
 | Function | Name | Written by |
 |---|---|---|
@@ -141,8 +141,9 @@ says.
 registry renews when an expired name is registered again, to anyone. A previous holder's config and
 records are therefore never read, and the new holder starts empty. A transfer keeps the resource,
 and the state with it, as ENS's resolvers keep a name's records: the buyer drops what the seller
-left with one `clearRecords(name)`, as with `clearRecords(node)` on ENS's `PublicResolver`. The
-same holds when a reserved name is registered. An expired name that is not registered again resolves
+left with one `clearRecords(name)`, as with `clearRecords(node)` on ENS's `PublicResolver`. A
+reserved name's registration starts empty, also after the reservation lapsed (ENSv2 keeps that
+resource; the state key includes the reserved status). An expired name that is not registered again resolves
 as a wildcard name of its parent, and a record the parent wrote for it before it was registered is
 served again, as ENS falls back to the parent's resolver. A parent therefore clears a username's
 wildcard record before registering the username; it cannot while the username is registered.
@@ -313,7 +314,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 21,168 | 3,408 |
+| `StealthResolver` | 21,097 | 3,479 |
 | `Scheme1Verifier` | 1,657 | 22,919 |
 | `FluidkeyVerifier` | 5,543 | 19,033 |
 | `FluidkeySigners` | 927 | 23,649 |
@@ -326,19 +327,19 @@ read cost.
 
 | Path | Gas |
 |---|---|
-| `resolve` wildcard name, address, `OffchainLookup` revert | 44,570 |
-| `resolve` registered name, address, `OffchainLookup` revert | 24,969 |
-| `resolveStealthCallback`, unverified (wildcard name) | 49,260 + verifier |
-| `resolveStealthCallback`, verified (registered name) | 30,685 + verifier |
-| `resolve` registered name, `verifyStealthResolution` | 27,338 + verifier |
+| `resolve` wildcard name, address, `OffchainLookup` revert | 44,578 |
+| `resolve` registered name, address, `OffchainLookup` revert | 25,007 |
+| `resolveStealthCallback`, unverified (wildcard name) | 49,267 + verifier |
+| `resolveStealthCallback`, verified (registered name) | 30,722 + verifier |
+| `resolve` registered name, `verifyStealthResolution` | 27,376 + verifier |
 | `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,130 |
 | `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,504 |
 | `FluidkeyVerifier.verify`, unverified mode, signed | 14,740 |
-| `resolve` text, forwarded to a `PermissionedResolver` | 43,800 |
+| `resolve` text, forwarded to a `PermissionedResolver` | 43,808 |
 | `resolve` text on the `PermissionedResolver` directly (reference) | 6,426 |
-| `setConfig`, records resolver and one URL (transaction) | 143,372 |
-| `setChains`, one chain (transaction) | 91,431 |
-| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 158,902 |
+| `setConfig`, records resolver and one URL (transaction) | 143,403 |
+| `setChains`, one chain (transaction) | 91,462 |
+| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 158,933 |
 
 ## Build and test
 

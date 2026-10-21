@@ -45,10 +45,11 @@ import {IStealthVerifier} from "./interfaces/IStealthVerifier.sol";
 ///      name at or above the name written: a registered name writes its own state, an
 ///      unregistered (wildcard) name's record is written by its nearest registered ancestor. A
 ///      reserved name counts as registered: it exists in the registry in its own right. State is
-///      keyed by that authority's registry resource, which ENSv2 renews when an expired name is
-///      registered again, so a previous holder's state is never read. A transfer keeps the
-///      resource, and the state with it, as ENS's resolvers keep a name's records; the new holder
-///      clears it with `clearRecords`.
+///      keyed by that authority's registry resource and status, so a previous holder's state is
+///      never read: ENSv2 renews the resource when an expired name is registered again, and what
+///      was written while a name was reserved is not read once it is registered. A transfer keeps
+///      the resource, and the state with it, as ENS's resolvers keep a name's records; the new
+///      holder clears it with `clearRecords`.
 ///
 ///      Per query for a DNS-encoded name N, with the config of N's authority (nothing is inherited
 ///      past a registered name, so an ancestor never governs a registered descendant):
@@ -79,9 +80,10 @@ contract StealthResolver is
 
     /// @dev What the registry says about a name (`_context`).
     struct NameState {
-        /// @dev Storage key of the authority, from its registry, resource and version; zero if
-        ///      none.
+        /// @dev Storage key of the authority: `resourceKey` and its version; zero if none.
         bytes32 key;
+        /// @dev `keccak256(registry, resource, reserved)`: what `_versions` is keyed by.
+        bytes32 resourceKey;
         /// @dev The registry holding the authority's token.
         IPermissionedRegistry registry;
         /// @dev The authority's EAC resource in `registry`.
@@ -113,8 +115,8 @@ contract StealthResolver is
     ///      the nearest registered name at or above `node`.
     mapping(bytes32 key => mapping(bytes32 node => bytes)) private _metaAddresses;
 
-    /// @dev How many times an authority's state was cleared (`clearRecords`), by
-    ///      `keccak256(registry, resource)`; part of the authority key.
+    /// @dev How many times an authority's state was cleared (`clearRecords`), by its
+    ///      `resourceKey`; part of the authority key.
     mapping(bytes32 resourceKey => uint64 version) private _versions;
 
     ////////////////////////////////////////////////////////////////////////
@@ -291,7 +293,7 @@ contract StealthResolver is
     function clearRecords(bytes calldata name) external {
         NameState memory ctx = _context(name);
         if (!ctx.exact || !_isAuthority(ctx, msg.sender)) revert Unauthorized(name, msg.sender);
-        uint64 version = ++_versions[keccak256(abi.encode(ctx.registry, ctx.resource))];
+        uint64 version = ++_versions[ctx.resourceKey];
         emit VersionChanged(NameCoder.namehash(name, 0), version);
     }
 
@@ -540,10 +542,11 @@ contract StealthResolver is
             offset = next;
             IRegistry parent = registries[i + 1];
             if (address(parent) == address(0)) continue;
-            (bool registered, uint256 resource) = _registered(parent, labelHash);
-            if (!registered) continue;
-            bytes32 resourceKey = keccak256(abi.encode(parent, resource));
-            ctx.key = keccak256(abi.encode(resourceKey, _versions[resourceKey]));
+            (uint256 status, uint256 resource) = _registered(parent, labelHash);
+            if (status == uint256(IPermissionedRegistry.Status.AVAILABLE)) continue;
+            bool reserved = status == uint256(IPermissionedRegistry.Status.RESERVED);
+            ctx.resourceKey = keccak256(abi.encode(parent, resource, reserved));
+            ctx.key = keccak256(abi.encode(ctx.resourceKey, _versions[ctx.resourceKey]));
             ctx.registry = IPermissionedRegistry(address(parent));
             ctx.resource = resource;
             ctx.exact = i == 0;
@@ -551,24 +554,23 @@ contract StealthResolver is
         }
     }
 
-    /// @dev Whether `labelHash` is registered or reserved (not expired) in `registry`, and its EAC
-    ///      resource. A reserved name has no token: its resolver, and so its state, is set by
-    ///      whoever holds `ROLE_SET_RESOLVER` registry-wide, never by its parent's holder. ENSv2
-    ///      renews the resource when an expired name is registered again, but not when a reserved
-    ///      one is registered. A registry that is not a `PermissionedRegistry` registers nothing
-    ///      here.
+    /// @dev The status of `labelHash` in `registry` (AVAILABLE for an expired name, and for any
+    ///      registry that is not a `PermissionedRegistry`) and its EAC resource. A reserved name
+    ///      has no token: its resolver, and so its state, is set by whoever holds
+    ///      `ROLE_SET_RESOLVER` registry-wide, never by its parent's holder. ENSv2 renews the
+    ///      resource when an expired name is registered again, but not when a reserved one is
+    ///      registered, nor when a lapsed reservation's label is; the status is therefore part of
+    ///      the state key.
     function _registered(IRegistry registry, bytes32 labelHash)
         internal
         view
-        returns (bool registered, uint256 resource)
+        returns (uint256 status, uint256 resource)
     {
         (bool ok, bytes memory v) = address(registry).staticcall(
             abi.encodeCall(IPermissionedRegistry.getState, (uint256(labelHash)))
         );
-        if (!ok || v.length < 160) return (false, 0);
-        uint256 status;
+        if (!ok || v.length < 160) return (0, 0);
         (status,,,, resource) = abi.decode(v, (uint256, uint256, uint256, uint256, uint256));
-        registered = status != uint256(IPermissionedRegistry.Status.AVAILABLE);
     }
 
     /// @dev Every batch-gateway failure is wrapped as `UnsafeBatchGatewayResponse(bytes)`, which
