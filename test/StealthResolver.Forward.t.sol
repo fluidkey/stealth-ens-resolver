@@ -166,6 +166,29 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         );
     }
 
+    /// @dev The node-checked form checks every item, forwarded ones included, as ENS's
+    ///      `Multicallable` does: an item for another name fails the whole call.
+    function test_multicallWithNodeCheck_checksEveryItem() public {
+        bytes[] memory calls = new bytes[](2);
+        calls[0] = abi.encodeCall(IAddrResolver.addr, (bobNode));
+        calls[1] = abi.encodeCall(ITextResolver.text, (aliceNode, "url"));
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NodeMismatch.selector, aliceNode, bobNode)
+        );
+        resolver.resolve(
+            dns("bob.fkey.eth"),
+            abi.encodeCall(IMulticallable.multicallWithNodeCheck, (bobNode, calls))
+        );
+        calls[1] = hex"0102";
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NodeMismatch.selector, bytes32(0), bobNode)
+        );
+        resolver.resolve(
+            dns("bob.fkey.eth"),
+            abi.encodeCall(IMulticallable.multicallWithNodeCheck, (bobNode, calls))
+        );
+    }
+
     /// @dev Selectors other than the address profiles and the multicall forms are forwarded, so a
     ///      static address in the records resolver stays readable through them.
     function test_otherSelectorsReachStaticAddress() public {

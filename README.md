@@ -43,7 +43,7 @@ registered ancestor. Nothing is inherited past a registered name.
 | Address record for any other coin type, or no gateway URLs | Forwarded to the records resolver (the name's static address); unset if there is none. |
 | `data(node, "stealth-meta-address[<scheme>][<coinType>]")` | N's meta-address if the coin type is on the chain list, otherwise empty: the value the callback verifies against. |
 | Any other record | Forwarded to the records resolver, including offchain ones. |
-| `resolve(name, multicall(...))`, `resolve(name, multicallWithNodeCheck(node, ...))` | Answered as one batch (ERC-7996 `RESOLVE_MULTICALL`); each item resolved as above. |
+| `resolve(name, multicall(...))`, `resolve(name, multicallWithNodeCheck(node, ...))` | Answered as one batch (ERC-7996 `RESOLVE_MULTICALL`); each item resolved as above. The node-checked form requires the name's node in every item, as ENS's `Multicallable` does. |
 | `gatewayURLs(node)` | N's authority's URLs. Through `resolve()` only: called directly it reverts `ResolveOnly` (see Section 5 by name). |
 | `verifyStealthResolution(node, coinType, address, verificationData)` | Verified against N's record, located by name like every other query, wildcard names included. Through `resolve()` only, as above; no CCIP-Read is involved, so contracts can call it onchain. |
 | `getResolver(name)` (`ICompositeResolver`) | The records resolver, so apps know where to edit other records. |
@@ -289,7 +289,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 21,589 | 2,987 |
+| `StealthResolver` | 21,735 | 2,841 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
 | `FluidkeyVerifier` | 5,801 | 18,775 |
 | `FluidkeySigners` | 894 | 23,682 |

@@ -371,7 +371,9 @@ contract StealthResolver is
 
     /// @notice Resolves `data` for the DNS-encoded `name`, including names absent from the registry.
     /// @dev ENSIP-10; ENSIP-30 Sections 1 and 4. `multicall(bytes[])` and
-    ///      `multicallWithNodeCheck(bytes32, bytes[])` are answered as a batch.
+    ///      `multicallWithNodeCheck(bytes32, bytes[])` are answered as a batch; the latter checks
+    ///      that its node is the name's and that every item carries it, as ENS's `Multicallable`
+    ///      does.
     function resolve(bytes calldata name, bytes calldata data)
         external
         view
@@ -382,8 +384,13 @@ contract StealthResolver is
             _resolveMulticall(name, abi.decode(data[4:], (bytes[])));
         }
         if (selector == IMulticallable.multicallWithNodeCheck.selector) {
-            _checkNode(name, data);
+            bytes32 node = _checkNode(name, data);
             (, bytes[] memory calls) = abi.decode(data[4:], (bytes32, bytes[]));
+            for (uint256 i; i < calls.length; ++i) {
+                bytes32 itemNode =
+                    calls[i].length < 36 ? bytes32(0) : BytesUtils.readBytes32(calls[i], 4);
+                if (itemNode != node) revert NodeMismatch(itemNode, node);
+            }
             _resolveMulticall(name, calls);
         }
         return _resolveOne(name, data);
