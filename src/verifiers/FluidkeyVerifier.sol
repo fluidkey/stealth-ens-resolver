@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.25;
 
+import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 
@@ -46,14 +47,14 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
     ////////////////////////////////////////////////////////////////////////
 
     address internal constant SAFE_PROXY_FACTORY = 0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2;
-    address internal constant SAFE_SINGLETON = 0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552;
     address internal constant SAFE_FALLBACK_HANDLER = 0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4;
     address internal constant SAFE_MULTI_SEND = 0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761;
     address internal constant SAFE_MODULE_SETUP = 0x2dd68b007B46fBe91B9A7c3EDa5A7a1063cB5b47;
     address internal constant EARN_MODULE = 0x3BDb857AFe9b51d8916D80240d2ADe40D4d3f2f9;
 
-    /// @dev keccak256(GnosisSafeProxy creation code || uint256(SAFE_SINGLETON)); the creation code
-    ///      is the factory's `proxyCreationCode()`.
+    /// @dev keccak256(GnosisSafeProxy creation code || uint256(singleton)) for the L1 singleton
+    ///      0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552; the creation code is the factory's
+    ///      `proxyCreationCode()`.
     bytes32 internal constant SAFE_PROXY_INIT_CODE_HASH =
         0x56e3081a3d1bb38ed4eed1a39f7729c3cc77c7825794c15bbf326f3047fd779c;
 
@@ -197,17 +198,7 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
             address(0)
         );
         bytes32 salt = keccak256(abi.encodePacked(keccak256(initializer), uint256(0)));
-        return address(
-            uint160(
-                uint256(
-                    keccak256(
-                        abi.encodePacked(
-                            bytes1(0xff), SAFE_PROXY_FACTORY, salt, SAFE_PROXY_INIT_CODE_HASH
-                        )
-                    )
-                )
-            )
-        );
+        return Create2.computeAddress(salt, SAFE_PROXY_INIT_CODE_HASH, SAFE_PROXY_FACTORY);
     }
 
     /// @notice The Safe setup `data` for auto-earn with `configHash`: MultiSend of a delegatecall to

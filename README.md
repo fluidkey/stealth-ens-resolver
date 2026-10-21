@@ -310,7 +310,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 |---|---|---|
 | `StealthResolver` | 22,128 | 2,448 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
-| `FluidkeyVerifier` | 5,815 | 18,761 |
+| `FluidkeyVerifier` | 5,785 | 18,791 |
 | `FluidkeySigners` | 894 | 23,682 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
