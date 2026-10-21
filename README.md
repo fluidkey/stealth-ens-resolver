@@ -78,7 +78,10 @@ UniversalResolver does for batched resolutions, unless the client batches locall
 (`x-batch-gateway:true`). That gateway then sees the stealth gateway's response, including
 `verificationData`, and in unverified mode it could replace the address: a verifier that checks
 nothing in unverified mode also trusts the batch gateway; one that authenticates the response, such
-as a signature by the stealth gateway, does not. Verified mode is unaffected.
+as a signature by the stealth gateway, does not. In verified mode it cannot change whose address it
+is, but it can answer with a derivation from an ephemeral key of its own, which the recipient finds
+only if it learns that key. Scheme 1 trusts the batch gateway for this; FK1 requires the stealth
+gateway's signature in both modes.
 
 ### Who may write
 
@@ -179,30 +182,69 @@ stealth address = CREATE2 address of a Safe 1.3.0 proxy owned by `owner`, thresh
 ```
 
 The Safe uses the default Safe 1.3.0 deployments (factory, L1 singleton, compatibility fallback
-handler), which have the same addresses on every chain, so a stealth Safe does too. Its setup `to`
-and `data` follow the account's auto-earn setting and affect who can move funds, so they are fixed
-by the scheme and selected by the record, never by the gateway (ENSIP-30 Section 5). The meta-address
-is 65 bytes, the compressed spending key followed by the Earn module's `configHash`, as the Earn
-module itself stores per account: 0 means auto-earn off and an empty setup; any other value means a
-setup that enables the Earn module and installs that `configHash`, rebuilt from a fixed template
-that reproduces the setup data Fluidkey publishes for auto-earn v1.1. Changing auto-earn settings
-is a record write; a new Earn module or Safe version is a new scheme, FK2, with its own verifier
-and resolver.
+handler, MultiSend, SafeModuleSetup), so a stealth Safe has the same address on every chain. It is
+the recipient's only where those contracts are deployed: elsewhere the address can be out of reach,
+or deployable without its setup by whoever knows `owner`. The verifier therefore answers only for
+the chains below, which all have them, and reverts `UnsupportedChain` for any other coin type in
+both modes, the ENSIP-19 default (`0x80000000`) included. The list is immutable: a name that lists
+another chain fails lookups on it.
 
-Verified mode takes the scheme 1 layout, `e || S.x || S.y`, and the same two `ecrecover` calls.
-Unverified mode (no record) requires the gateway's response to be signed: `verificationData` is
-`abi.encode(uint64 expires, bytes signature)`, an EIP-712 signature (domain `FluidkeyVerifier`,
-version `1`) over `StealthResolution(address resolver, bytes32 node, uint256 coinType, address
-stealthAddress, uint64 expires)` by an account that `FluidkeySigners` lists. That binds the
-response to the resolver, name, chain and address, and stops a batch gateway from substituting the
-address; it authenticates Fluidkey and is not verification under the ENSIP. `FluidkeySigners` is
-owned by Fluidkey so signing keys rotate without redeploying; it decides nothing in verified mode.
-The scheme ID, FK1 (`0x464B31`, 4606769), is a constructor argument: the scheme's ERC declares it.
+| Chain | Coin type |
+|---|---|
+| Ethereum | `60` |
+| Base | `0x80002105` |
+| OP Mainnet | `0x8000000a` |
+| Arbitrum One | `0x8000a4b1` |
+| Polygon PoS | `0x80000089` |
+| Gnosis | `0x80000064` |
+| BNB Smart Chain | `0x80000038` |
+
+The Safe's setup `to` and `data` follow the account's auto-earn setting and affect who can move
+funds, so they are fixed by the scheme and selected by the record, never by the gateway (ENSIP-30
+Section 5). The meta-address is 65 bytes, the compressed spending key followed by a `configHash`: 0
+means auto-earn off and an empty setup; any other value means a setup that enables Fluidkey's Earn
+module and installs that `configHash`, rebuilt from a fixed template that reproduces the setup data
+of Fluidkey's production Safes. The `configHash` is part of the Safe's address, so the record
+carries the one new Safes are installed with, not the value the module stores for an existing Safe,
+which can change after deployment. Changing auto-earn settings is a record write; a new Earn module
+or Safe version is a new scheme, FK2, with its own verifier and resolver.
+
+Any `configHash` is accepted: the name's authority, which writes the record, chooses it. A
+`configHash` stands for a list of (chain, token, vault) entries registered in the Earn module by its
+owner, a Fluidkey multisig, and lets the relayers the owner appoints deposit the Safe's listed
+tokens into the listed vaults. The module's owner and relayers are therefore trusted for auto-earn
+Safes, and an authority writes only a `configHash` whose list it has checked. On BNB Smart Chain the
+Earn module is not deployed yet, so an auto-earn Safe there enables a module address with no code,
+and whoever deploys code at that address would control those Safes. This relies on that address
+being deployable only by Fluidkey's multisig.
+
+Both modes require a signature by an account that `FluidkeySigners` lists (EIP-712, domain
+`FluidkeyVerifier`, version `1`), bound to the resolver, name and chain:
+
+- Verified mode: `verificationData` is `e || S.x || S.y || signature`, 161 bytes. The derivation is
+  checked as for scheme 1, with two `ecrecover` calls, and the signature is over
+  `VerifiedStealthResolution(address resolver, bytes32 node, uint256 coinType, address
+  stealthAddress)` for the derived Safe. Any `e` with its point passes the curve checks, so without
+  the signature a batch gateway could answer from an ephemeral key of its own: the Safe would still
+  be the recipient's, but Fluidkey, which finds payments by regenerating its own ephemeral keys,
+  would not find it. The signature does not expire: the record fixes the Safe for each `e`, so a
+  replayed response answers the same Safe again, and the payers it is replayed to share one address.
+- Unverified mode (no record): `verificationData` is `abi.encode(uint64 expires, bytes signature)`,
+  over `StealthResolution(address resolver, bytes32 node, uint256 coinType, address stealthAddress,
+  uint64 expires)`. That stops a batch gateway from substituting the address; it authenticates
+  Fluidkey and is not verification under the ENSIP. The verifier does not cap `expires`: a relay
+  that kept a response can serve it until then, also after the name changes hands, so the gateway
+  should sign short expiries.
+
+`FluidkeySigners` is owned by Fluidkey so signing keys rotate without redeploying. In verified mode
+a signer can refuse a derivation but cannot make the verifier return a Safe the record does not
+derive. The scheme ID, FK1 (`0x464B31`, 4606769), is a constructor argument: the scheme's ERC
+declares it.
 
 Fluidkey's gateway answers with the Safe address and, if the name has a record (read onchain as the
-callback reads it), `e || S.x || S.y`; otherwise the signed expiry. Records written for FK1 keep
-the client-side derivation flag clear: Fluidkey finds payments by regenerating its own ephemeral
-keys and cannot detect ones a sender derived.
+callback reads it), `e || S.x || S.y` and the signature; otherwise the signed expiry. Records
+written for FK1 keep the client-side derivation flag clear: Fluidkey finds payments by regenerating
+its own ephemeral keys and cannot detect ones a sender derived.
 
 ## Contracts
 
@@ -213,7 +255,7 @@ keys and cannot detect ones a sender derived.
 | `interfaces/IStealthVerifier` | Scheme-specific verification, one verifier per scheme |
 | `verifiers/Scheme1Verifier` | ERC-5564 scheme 1 (see Scheme 1) |
 | `verifiers/FluidkeyVerifier` | Fluidkey stealth Safe, FK1 (see Fluidkey stealth Safe) |
-| `verifiers/FluidkeySigners` | Fluidkey gateway signers for FK1's unverified mode, owned by Fluidkey |
+| `verifiers/FluidkeySigners` | Fluidkey gateway signers for FK1, owned by Fluidkey |
 | `verifiers/LibEcrecover` | secp256k1 `a·G + b·Q` on `ecrecover`, shared by the verifiers |
 
 ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCoder`, `ENSIP19`
@@ -225,7 +267,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 |---|---|---|
 | `StealthResolver` | 20,825 | 3,751 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
-| `FluidkeyVerifier` | 5,518 | 19,058 |
+| `FluidkeyVerifier` | 5,939 | 18,637 |
 | `FluidkeySigners` | 894 | 23,682 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
@@ -242,8 +284,8 @@ read cost.
 | `resolveStealthCallback`, verified (registered name) | 29,191 + verifier |
 | `resolve` registered name, `verifyStealthResolution` | 26,918 + verifier |
 | `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,122 |
-| `FluidkeyVerifier.verify`, verified mode, auto-earn Safe | 19,165 |
-| `FluidkeyVerifier.verify`, signed unverified response | 12,183 |
+| `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,731 |
+| `FluidkeyVerifier.verify`, unverified mode, signed | 14,912 |
 | `resolve` text, forwarded to a `PermissionedResolver` | 43,378 |
 | `resolve` text on the `PermissionedResolver` directly (reference) | 6,425 |
 | `setConfig`, records resolver and one URL (transaction) | 140,996 |
@@ -281,7 +323,7 @@ node script/vectors/scheme1.mjs <dir> > test/utils/Scheme1Vectors.sol && forge f
 ```
 
 The FK1 vectors in `test/utils/FluidkeyVectors.sol` come from Fluidkey's stealth-account-kit the
-same way, for three Safe setups (auto-earn off, the production v1.1 `configHash`, another one):
+same way, for three Safe setups (auto-earn off, the kit's auto-earn v1.1 `configHash`, another one):
 
 ```bash
 npm install --prefix <dir> --ignore-scripts @fluidkey/stealth-account-kit@1.1.1

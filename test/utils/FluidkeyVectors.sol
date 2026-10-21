@@ -5,7 +5,7 @@ pragma solidity 0.8.25;
 // (@noble/secp256k1@1.7.1). Do not edit: regenerate, then `forge fmt`.
 
 /// @dev FK1 derivations by Fluidkey's stealth-account-kit. Vector i has Safe setup i / 4 (auto-earn
-///      off, the production auto-earn v1.1 configHash, another configHash), spending key parity
+///      off, the kit's auto-earn v1.1 configHash, another configHash), spending key parity
 ///      (i >> 1) & 1 and shared secret point parity i & 1.
 library FluidkeyVectors {
     struct Vector {

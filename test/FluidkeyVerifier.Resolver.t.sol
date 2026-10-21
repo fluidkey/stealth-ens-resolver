@@ -2,6 +2,7 @@
 pragma solidity 0.8.25;
 
 import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol";
+import {IAddressResolver} from "@ens/contracts/resolvers/profiles/IAddressResolver.sol";
 
 import {StealthResolver} from "../src/StealthResolver.sol";
 import {FluidkeySigners} from "../src/verifiers/FluidkeySigners.sol";
@@ -22,7 +23,7 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
         signers = new FluidkeySigners(address(this));
         signers.setSigner(vm.addr(SIGNER_KEY), true);
         vm.etch(address(verifier), address(new FluidkeyVerifier(0x464B31, signers)).code);
-        v = FluidkeyVectors.all()[6]; // production auto-earn v1.1 setup
+        v = FluidkeyVectors.all()[6]; // the kit's auto-earn v1.1 setup
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), STEALTH_GW);
         setChain(alice, "alice.fkey.eth", COIN_ETH, true);
         setMeta(alice, "alice.fkey.eth", abi.encodePacked(hex"00", v.metaAddress));
@@ -37,12 +38,8 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
         );
     }
 
-    /// @dev The Fluidkey gateway's signature over a response, as `_sign` in the unit tests.
-    function _signed(bytes32 forNode, address claimed, uint64 expires)
-        internal
-        view
-        returns (bytes memory)
-    {
+    /// @dev A Fluidkey signer's EIP-712 signature, as the unit tests build it.
+    function _sig(bytes32 structHash) internal view returns (bytes memory) {
         bytes32 domain = keccak256(
             abi.encode(
                 keccak256(
@@ -54,6 +51,34 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
                 address(verifier)
             )
         );
+        (uint8 sv, bytes32 r, bytes32 s) =
+            vm.sign(SIGNER_KEY, keccak256(abi.encodePacked(hex"1901", domain, structHash)));
+        return abi.encodePacked(r, s, sv);
+    }
+
+    /// @dev The Fluidkey gateway's verified response for `forNode` on Ethereum: the vector's
+    ///      derivation and a signature over its Safe.
+    function _signedDerivation(bytes32 forNode) internal view returns (bytes memory) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                keccak256(
+                    "VerifiedStealthResolution(address resolver,bytes32 node,uint256 coinType,address stealthAddress)"
+                ),
+                address(resolver),
+                forNode,
+                COIN_ETH,
+                v.stealthAddress
+            )
+        );
+        return bytes.concat(v.verificationData, _sig(structHash));
+    }
+
+    /// @dev The Fluidkey gateway's unverified response for `forNode` on Ethereum.
+    function _signed(bytes32 forNode, address claimed, uint64 expires)
+        internal
+        view
+        returns (bytes memory)
+    {
         bytes32 structHash = keccak256(
             abi.encode(
                 keccak256(
@@ -66,14 +91,12 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
                 expires
             )
         );
-        (uint8 sv, bytes32 r, bytes32 s) =
-            vm.sign(SIGNER_KEY, keccak256(abi.encodePacked(hex"1901", domain, structHash)));
-        return abi.encode(expires, abi.encodePacked(r, s, sv));
+        return abi.encode(expires, _sig(structHash));
     }
 
     function test_verified() public {
         gwClaimed = v.stealthAddress;
-        gwVerificationData = v.verificationData;
+        gwVerificationData = _signedDerivation(aliceNode);
         (bool ok, bytes memory result) = _addr("alice.fkey.eth");
         assertTrue(ok);
         assertEq(abi.decode(abi.decode(result, (bytes)), (address)), v.stealthAddress);
@@ -82,7 +105,7 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
     function test_verified_lyingGatewayRejected() public {
         address attacker = makeAddr("attacker");
         gwClaimed = attacker;
-        gwVerificationData = v.verificationData;
+        gwVerificationData = _signedDerivation(aliceNode);
         (bool ok, bytes memory result) = _addr("alice.fkey.eth");
         assertFalse(ok);
         assertEq(
@@ -90,6 +113,43 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
             abi.encodeWithSelector(
                 StealthResolver.StealthAddressMismatch.selector, attacker, v.stealthAddress
             )
+        );
+    }
+
+    /// @dev A derivation without the signature, as a batch gateway answering from its own
+    ///      ephemeral key would send, or signed for another name, is refused.
+    function test_verified_unsignedOrOtherNameRejected() public {
+        gwClaimed = v.stealthAddress;
+        gwVerificationData = v.verificationData;
+        (bool ok, bytes memory result) = _addr("alice.fkey.eth");
+        assertFalse(ok);
+        assertEq(bytes4(result), FluidkeyVerifier.InvalidVerificationData.selector);
+
+        gwVerificationData = _signedDerivation(bobNode);
+        (ok, result) = _addr("alice.fkey.eth");
+        assertFalse(ok);
+        assertEq(bytes4(result), FluidkeyVerifier.UnknownSigner.selector);
+    }
+
+    /// @dev A chain FK1 does not support fails the lookup even when the name lists it.
+    function test_unsupportedChainRejected() public {
+        uint256 zkSyncEra = 0x80000000 | 324;
+        setChain(alice, "alice.fkey.eth", zkSyncEra, true);
+        gwClaimed = v.stealthAddress;
+        gwVerificationData = _signedDerivation(aliceNode);
+        (bool ok, bytes memory result) = ccipCall(
+            address(resolver),
+            abi.encodeCall(
+                resolver.resolve,
+                (
+                    dns("alice.fkey.eth"),
+                    abi.encodeCall(IAddressResolver.addr, (aliceNode, zkSyncEra))
+                )
+            )
+        );
+        assertFalse(ok);
+        assertEq(
+            result, abi.encodeWithSelector(FluidkeyVerifier.UnsupportedChain.selector, zkSyncEra)
         );
     }
 
@@ -115,25 +175,30 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
         assertFalse(ok);
     }
 
-    /// @dev The verifier's own cost in both modes, written to `snapshots/Gas.json`.
-    function test_gas() public {
+    /// @dev The verifier's own cost in verified mode, written to `snapshots/Gas.json`. Each mode
+    ///      is its own test, so each starts cold, as the first call in a transaction does.
+    function test_gas_verified() public {
         bytes memory call = abi.encodeCall(
             FluidkeyVerifier.verify,
-            (aliceNode, COIN_ETH, v.metaAddress, v.verificationData, v.stealthAddress)
+            (aliceNode, COIN_ETH, v.metaAddress, _signedDerivation(aliceNode), v.stealthAddress)
         );
+        vm.prank(address(resolver));
         uint256 before = gasleft();
         (bool ok,) = address(verifier).staticcall(call);
         vm.snapshotValue("Gas", "FluidkeyVerifier_verify_verified", before - gasleft());
         assertTrue(ok);
+    }
 
+    /// @dev The verifier's own cost for a signed unverified response.
+    function test_gas_signed() public {
         address claimed = makeAddr("bob's safe");
-        call = abi.encodeCall(
+        bytes memory call = abi.encodeCall(
             FluidkeyVerifier.verify,
             (bobNode, COIN_ETH, "", _signed(bobNode, claimed, uint64(block.timestamp)), claimed)
         );
         vm.prank(address(resolver));
-        before = gasleft();
-        (ok,) = address(verifier).staticcall(call);
+        uint256 before = gasleft();
+        (bool ok,) = address(verifier).staticcall(call);
         vm.snapshotValue("Gas", "FluidkeyVerifier_verify_signed", before - gasleft());
         assertTrue(ok);
     }

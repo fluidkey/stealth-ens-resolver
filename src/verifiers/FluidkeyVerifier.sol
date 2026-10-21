@@ -16,21 +16,28 @@ import {LibEcrecover} from "./LibEcrecover.sol";
 ///        h     = keccak256(S.x || S.y) mod n     (uncompressed point, no prefix)
 ///        owner = address(h·P_spend)              (multiplicative stealth key)
 ///        stealth address = a counterfactual 1-of-1 Safe 1.3.0 owned by `owner`, at its CREATE2
-///        address from the default Safe deployments (the same on every chain).
+///        address from the default Safe deployments.
 ///      The Safe's setup `to` and `data` follow the Earn module's auto-earn setting: none when
 ///      `configHash` is 0, otherwise a MultiSend that enables the Earn module and installs
 ///      `configHash`. They affect control of the Safe, so they are fixed here and selected by the
-///      `configHash` in the record (ENSIP-30 Section 5), never by the gateway. A new Earn module or
-///      Safe version is a new scheme (FK2).
+///      `configHash` in the record (ENSIP-30 Section 5), never by the gateway. Any `configHash` is
+///      accepted: the record's writer chooses it. A new Earn module or Safe version is a new scheme
+///      (FK2).
+///      Both modes answer only for the chains `isSupportedChain` lists.
 ///
 ///      Meta-address (65 bytes) = compressed P_spend || configHash (uint256, 0 = auto-earn off).
-///      Verified mode: `verificationData` = e || S.x || S.y (96 bytes), checked with two
-///      `ecrecover` calls as in `Scheme1Verifier`.
+///      Verified mode: `verificationData` = e || S.x || S.y || signature (161 bytes). The
+///      derivation is checked with two `ecrecover` calls as in `Scheme1Verifier`. Any `e` passes
+///      that check, so the signature, an EIP-712 signature by a Fluidkey gateway signer over the
+///      resolver, node, coin type and derived Safe, ties the derivation to Fluidkey's gateway,
+///      whose ephemeral keys Fluidkey regenerates to find payments: a batch gateway answering from
+///      its own `e` is refused. It does not expire, since the record fixes the Safe for each `e`.
 ///      Unverified mode (no record): `verificationData` = abi.encode(uint64 expires, bytes
 ///      signature), an EIP-712 signature by a Fluidkey gateway signer over the resolver, node,
 ///      coin type, returned address and expiry. This authenticates the gateway (and defeats a
 ///      batch gateway substituting the address); it is not verification under ENSIP-30.
-///      No owner: the signer set lives in `SIGNERS`, which affects unverified mode only.
+///      No owner. The signer set (`SIGNERS`) is Fluidkey's: in verified mode a signer can refuse
+///      a derivation but cannot make the verifier return a Safe the record does not derive.
 contract FluidkeyVerifier is IStealthVerifier, EIP712 {
     ////////////////////////////////////////////////////////////////////////
     // Scheme constants (Safe 1.3.0 default deployments, Fluidkey Earn module)
@@ -48,6 +55,11 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
     bytes32 internal constant SAFE_PROXY_INIT_CODE_HASH =
         0x56e3081a3d1bb38ed4eed1a39f7729c3cc77c7825794c15bbf326f3047fd779c;
 
+    /// @dev EIP-712 type of a signed verified response: the Safe derived from the record.
+    bytes32 internal constant VERIFIED_STEALTH_RESOLUTION_TYPEHASH = keccak256(
+        "VerifiedStealthResolution(address resolver,bytes32 node,uint256 coinType,address stealthAddress)"
+    );
+
     /// @dev EIP-712 type of a signed unverified response.
     bytes32 internal constant STEALTH_RESOLUTION_TYPEHASH = keccak256(
         "StealthResolution(address resolver,bytes32 node,uint256 coinType,address stealthAddress,uint64 expires)"
@@ -57,7 +69,7 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
     // Immutables
     ////////////////////////////////////////////////////////////////////////
 
-    /// @notice Fluidkey gateway signers, for unverified mode.
+    /// @notice Fluidkey gateway signers.
     IFluidkeySigners public immutable SIGNERS;
 
     /// @dev The ERC-5564 scheme ID, fixed at deployment (FK1 = 0x464B31 = 4606769).
@@ -73,10 +85,14 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
     /// @notice The signer registry must be a contract.
     error InvalidSigners(address signers);
 
+    /// @notice FK1 Safes are not supported on the chain of `coinType`.
+    error UnsupportedChain(uint256 coinType);
+
     /// @notice The meta-address is not a compressed secp256k1 key and a configHash.
     error MalformedMetaAddress();
 
-    /// @notice `verificationData` is not an ephemeral private key followed by a point (96 bytes).
+    /// @notice `verificationData` is not an ephemeral private key, a point and a signature
+    ///         (161 bytes).
     error InvalidVerificationData();
 
     /// @notice The supplied shared secret point is not the ephemeral key times the spending key.
@@ -119,30 +135,34 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
         bytes calldata verificationData,
         address claimed
     ) external view returns (address) {
+        if (!isSupportedChain(coinType)) revert UnsupportedChain(coinType);
         if (metaAddress.length == 0) {
             return _verifySigned(node, coinType, verificationData, claimed);
         }
-        if (metaAddress.length != 65) revert MalformedMetaAddress();
-        (bool ok, uint256 spendX, uint8 spendParity) = LibEcrecover.compressedKey(metaAddress[0:33]);
-        if (!ok) revert MalformedMetaAddress();
-        uint256 configHash = uint256(bytes32(metaAddress[33:65]));
+        address stealth = _derive(metaAddress, verificationData);
+        _checkSigner(
+            keccak256(
+                abi.encode(
+                    VERIFIED_STEALTH_RESOLUTION_TYPEHASH, msg.sender, node, coinType, stealth
+                )
+            ),
+            verificationData[96:161]
+        );
+        return stealth;
+    }
 
-        if (verificationData.length != 96) revert InvalidVerificationData();
-        uint256 e = uint256(bytes32(verificationData[0:32]));
-        if (e == 0 || e >= LibEcrecover.N) revert InvalidVerificationData();
-
-        // S = e·P_spend. Zero only if the spending key is not on the curve.
-        address shared = LibEcrecover.mulAdd(0, e, spendX, spendParity);
-        if (shared == address(0)) revert MalformedMetaAddress();
-        if (shared != LibEcrecover.pointAddress(verificationData[32:96])) {
-            revert InvalidSharedSecret();
-        }
-
-        // owner = h·P_spend. Zero only if h ≡ 0 mod n (negligible).
-        uint256 h = uint256(keccak256(verificationData[32:96])) % LibEcrecover.N;
-        address owner = LibEcrecover.mulAdd(0, h, spendX, spendParity);
-        if (owner == address(0)) revert InvalidSharedSecret();
-        return safeAddress(owner, configHash);
+    /// @notice Whether FK1 answers for `coinType` (ENSIP-11, ENSIP-19): Ethereum, Base, OP
+    ///         Mainnet, Arbitrum One, Polygon PoS, Gnosis and BNB Smart Chain. All have the Safe
+    ///         contracts above; BNB Smart Chain does not have the Earn module yet, whose address
+    ///         only Fluidkey can deploy (README, "Fluidkey stealth Safe (FK1)").
+    function isSupportedChain(uint256 coinType) public pure returns (bool) {
+        return coinType == 60 // Ethereum
+            || coinType == 0x80002105 // Base (8453)
+            || coinType == 0x8000000a // OP Mainnet (10)
+            || coinType == 0x8000a4b1 // Arbitrum One (42161)
+            || coinType == 0x80000089 // Polygon PoS (137)
+            || coinType == 0x80000064 // Gnosis (100)
+            || coinType == 0x80000038; // BNB Smart Chain (56)
     }
 
     /// @notice The CREATE2 address of the 1-of-1 Safe owned by `owner` with the setup for
@@ -200,6 +220,36 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
         return abi.encodeWithSelector(0x8d80ff0a, transactions); // multiSend(bytes)
     }
 
+    /// @dev Verified mode: the Safe derived from `metaAddress` and the e || S.x || S.y that
+    ///      `verificationData` starts with, which must also hold a 65-byte signature.
+    function _derive(bytes calldata metaAddress, bytes calldata verificationData)
+        internal
+        pure
+        returns (address)
+    {
+        if (metaAddress.length != 65) revert MalformedMetaAddress();
+        (bool ok, uint256 spendX, uint8 spendParity) = LibEcrecover.compressedKey(metaAddress[0:33]);
+        if (!ok) revert MalformedMetaAddress();
+        uint256 configHash = uint256(bytes32(metaAddress[33:65]));
+
+        if (verificationData.length != 161) revert InvalidVerificationData();
+        uint256 e = uint256(bytes32(verificationData[0:32]));
+        if (e == 0 || e >= LibEcrecover.N) revert InvalidVerificationData();
+
+        // S = e·P_spend. Zero only if the spending key is not on the curve.
+        address shared = LibEcrecover.mulAdd(0, e, spendX, spendParity);
+        if (shared == address(0)) revert MalformedMetaAddress();
+        if (shared != LibEcrecover.pointAddress(verificationData[32:96])) {
+            revert InvalidSharedSecret();
+        }
+
+        // owner = h·P_spend. Zero only if h ≡ 0 mod n (negligible).
+        uint256 h = uint256(keccak256(verificationData[32:96])) % LibEcrecover.N;
+        address owner = LibEcrecover.mulAdd(0, h, spendX, spendParity);
+        if (owner == address(0)) revert InvalidSharedSecret();
+        return safeAddress(owner, configHash);
+    }
+
     /// @dev Unverified mode: `claimed` if a current Fluidkey gateway signer signed it for this
     ///      resolver (`msg.sender`), node and coin type before `expires`.
     function _verifySigned(
@@ -210,15 +260,20 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
     ) internal view returns (address) {
         (uint64 expires, bytes memory signature) = abi.decode(verificationData, (uint64, bytes));
         if (block.timestamp > expires) revert SignatureExpired(expires);
-        bytes32 digest = _hashTypedDataV4(
+        _checkSigner(
             keccak256(
                 abi.encode(
                     STEALTH_RESOLUTION_TYPEHASH, msg.sender, node, coinType, claimed, expires
                 )
-            )
+            ),
+            signature
         );
-        address signer = ECDSA.recover(digest, signature);
-        if (!SIGNERS.isSigner(signer)) revert UnknownSigner(signer);
         return claimed;
+    }
+
+    /// @dev Reverts unless a current Fluidkey gateway signer signed the EIP-712 `structHash`.
+    function _checkSigner(bytes32 structHash, bytes memory signature) internal view {
+        address signer = ECDSA.recover(_hashTypedDataV4(structHash), signature);
+        if (!SIGNERS.isSigner(signer)) revert UnknownSigner(signer);
     }
 }

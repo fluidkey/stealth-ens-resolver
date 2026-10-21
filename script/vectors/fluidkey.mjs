@@ -1,7 +1,7 @@
 // Generates test/utils/FluidkeyVectors.sol: FK1 derivations computed by Fluidkey's
 // stealth-account-kit (generateEphemeralPrivateKey, generateStealthAddresses,
 // predictStealthSafeAddressWithBytecode), for each parity of the spending key and the shared
-// secret point and for three Safe setups: auto-earn off, the production auto-earn v1.1 configHash
+// secret point and for three Safe setups: auto-earn off, the kit's auto-earn v1.1 configHash
 // and another configHash. The auto-earn setup data is built from the template and checked against
 // the v1.1 bytes the kit publishes (initdata/stealth-account-initdata.md); every owner key is
 // rederived from the curve operations.
@@ -117,7 +117,7 @@ pragma solidity 0.8.25;
 // (@noble/secp256k1@${version("@noble/secp256k1")}). Do not edit: regenerate, then \`forge fmt\`.
 
 /// @dev FK1 derivations by Fluidkey's stealth-account-kit. Vector i has Safe setup i / 4 (auto-earn
-///      off, the production auto-earn v1.1 configHash, another configHash), spending key parity
+///      off, the kit's auto-earn v1.1 configHash, another configHash), spending key parity
 ///      (i >> 1) & 1 and shared secret point parity i & 1.
 library FluidkeyVectors {
     struct Vector {
