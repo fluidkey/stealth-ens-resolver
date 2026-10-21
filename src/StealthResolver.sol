@@ -320,19 +320,6 @@ contract StealthResolver is
         return _isAuthority(_context(name), account);
     }
 
-    /// @notice The config set on the registered name `name` itself; empty for other names.
-    /// @dev ENSIP-30 Section 5: the gateway URLs stored per name, with the records resolver.
-    function config(bytes calldata name)
-        external
-        view
-        returns (address recordsResolver, string[] memory urls)
-    {
-        NameState memory ctx = _context(name);
-        if (!ctx.exact) return (address(0), urls);
-        Config storage c = _configs[ctx.key];
-        return (c.recordsResolver, c.gatewayURLs);
-    }
-
     /// @notice Whether an address query for `name` on `coinType` goes to the gateway: the coin
     ///         type is on the chain list of its authority (the name itself if registered,
     ///         otherwise its nearest registered ancestor) and the authority has gateway URLs.

@@ -48,9 +48,8 @@ contract StealthResolverConfigTest is StealthResolverFixture {
         );
         vm.prank(alice);
         resolver.setConfig(dns("alice.fkey.eth"), address(aliceRecords), gw);
-        (address records, string[] memory own) = resolver.config(dns("alice.fkey.eth"));
+        (address records,) = resolver.getResolver(dns("alice.fkey.eth"));
         assertEq(records, address(aliceRecords));
-        assertEq(own[0], "https://alice.gw");
         bytes memory v = resolver.resolve(
             dns("alice.fkey.eth"), abi.encodeCall(IStealthResolver.gatewayURLs, (aliceNode))
         );

@@ -309,7 +309,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 22,921 | 1,655 |
+| `StealthResolver` | 22,434 | 2,142 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
 | `FluidkeyVerifier` | 5,815 | 18,761 |
 | `FluidkeySigners` | 894 | 23,682 |
