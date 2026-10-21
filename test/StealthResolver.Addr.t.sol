@@ -520,6 +520,29 @@ contract StealthResolverAddrTest is StealthResolverFixture {
 
     /// @dev The record is located by name, as for every other query: out-of-flow verification
     ///      covers wildcard names too.
+    /// @dev Once a name points at another resolver, a record left here no longer verifies, for the
+    ///      name itself and for wildcard names below a parent that moved.
+    function test_verify_onlyWhileTheNamesResolver() public {
+        setUpAliceVerified(COIN_ETH);
+        address derived = _derived();
+        assertEq(_verify("alice.fkey.eth", COIN_ETH, derived), derived);
+        vm.prank(alice);
+        fkeyRegistry.setResolver(uint256(keccak256("alice")), address(aliceRecords));
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NotNamesResolver.selector, address(aliceRecords))
+        );
+        resolver.resolve(dns("alice.fkey.eth"), _verifyCall("alice.fkey.eth", COIN_ETH, derived));
+
+        setMeta(fluidkey, "bob.fkey.eth", META);
+        assertEq(_verify("bob.fkey.eth", COIN_ETH, derived), derived);
+        vm.prank(fluidkey);
+        ethRegistry.setResolver(uint256(keccak256("fkey")), address(fkeyRecords));
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NotNamesResolver.selector, address(fkeyRecords))
+        );
+        resolver.resolve(dns("bob.fkey.eth"), _verifyCall("bob.fkey.eth", COIN_ETH, derived));
+    }
+
     function test_verifyThroughResolve() public {
         _setBobRecord();
         address derived = _derived();

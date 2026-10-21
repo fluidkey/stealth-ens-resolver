@@ -46,7 +46,7 @@ registered ancestor. Nothing is inherited past a registered name.
 | `resolve(name, multicall(...))`, `resolve(name, multicallWithNodeCheck(node, ...))` | Answered as one batch (ERC-7996 `RESOLVE_MULTICALL`); each item resolved as above. The node-checked form requires the name's node in every item, as ENS's `Multicallable` does. |
 | `gatewayURLs(node)` | N's authority's URLs. Through `resolve()` only: called directly it reverts `ResolveOnly` (see Section 5 by name). |
 | `schemeId()` | This resolver's scheme, for any name, as the ENSIP requires of `IStealthResolver`'s functions through `resolve()`; also answered directly. |
-| `verifyStealthResolution(node, coinType, address, verificationData)` | Verified against N's record, located by name like every other query, wildcard names included. Through `resolve()` only, as above; no CCIP-Read is involved, so contracts can call it onchain. |
+| `verifyStealthResolution(node, coinType, address, verificationData)` | Verified against N's record, located by name like every other query, wildcard names included. Through `resolve()` only, as above; no CCIP-Read is involved, so contracts can call it onchain. Answered only while `StealthResolver` is the name's resolver in the registry (`NotNamesResolver` otherwise), so a record the name abandoned by moving to another resolver no longer verifies. |
 | `getResolver(name)` (`ICompositeResolver`) | The records resolver, so apps know where to edit other records. |
 | `isStealthChain(name, coinType)` (view, not through `resolve()`) | Whether an address query for that coin type goes to the gateway: on the authority's chain list and gateway URLs set. Verified or not is told by the record. |
 
@@ -309,7 +309,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 22,126 | 2,450 |
+| `StealthResolver` | 22,921 | 1,655 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
 | `FluidkeyVerifier` | 5,815 | 18,761 |
 | `FluidkeySigners` | 894 | 23,682 |
@@ -322,19 +322,19 @@ read cost.
 
 | Path | Gas |
 |---|---|
-| `resolve` wildcard name, address, `OffchainLookup` revert | 44,859 |
-| `resolve` registered name, address, `OffchainLookup` revert | 25,258 |
-| `resolveStealthCallback`, unverified (wildcard name) | 49,260 + verifier |
-| `resolveStealthCallback`, verified (registered name) | 30,685 + verifier |
-| `resolve` registered name, `verifyStealthResolution` | 27,411 + verifier |
+| `resolve` wildcard name, address, `OffchainLookup` revert | 44,877 |
+| `resolve` registered name, address, `OffchainLookup` revert | 25,276 |
+| `resolveStealthCallback`, unverified (wildcard name) | 49,278 + verifier |
+| `resolveStealthCallback`, verified (registered name) | 30,703 + verifier |
+| `resolve` registered name, `verifyStealthResolution` | 43,773 + verifier |
 | `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,122 |
 | `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,639 |
 | `FluidkeyVerifier.verify`, unverified mode, signed | 14,923 |
-| `resolve` text, forwarded to a `PermissionedResolver` | 43,889 |
+| `resolve` text, forwarded to a `PermissionedResolver` | 43,907 |
 | `resolve` text on the `PermissionedResolver` directly (reference) | 6,426 |
-| `setConfig`, records resolver and one URL (transaction) | 143,394 |
-| `setChains`, one chain (transaction) | 91,431 |
-| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 158,924 |
+| `setConfig`, records resolver and one URL (transaction) | 143,412 |
+| `setChains`, one chain (transaction) | 91,449 |
+| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 158,942 |
 
 ## Build and test
 
