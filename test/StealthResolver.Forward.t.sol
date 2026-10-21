@@ -18,6 +18,7 @@ import {RegistryRolesLib} from "~src/registry/libraries/RegistryRolesLib.sol";
 import {PublicResolverV2} from "~src/resolver/PublicResolverV2.sol";
 
 import {StealthResolver} from "../src/StealthResolver.sol";
+import {MockExecutingRecords} from "./mocks/MockExecutingRecords.sol";
 import {MockOffchainRecords} from "./mocks/MockOffchainRecords.sol";
 import {StealthResolverFixture} from "./utils/StealthResolverFixture.sol";
 
@@ -180,15 +181,29 @@ contract StealthResolverForwardTest is StealthResolverFixture {
     ///      item, so it cannot reach a static address through a records resolver that executes
     ///      inner calldata.
     function test_nestedResolveRefused() public {
+        setConfig(alice, "alice.fkey.eth", address(new MockExecutingRecords()), STEALTH_GW);
+        setChain(alice, "alice.fkey.eth", COIN_ETH, true);
         bytes memory nested = abi.encodeCall(
-            resolver.resolve, (dns("bob.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (bobNode)))
+            resolver.resolve,
+            (dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode)))
         );
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IUniversalResolver.UnsupportedResolverProfile.selector, resolver.resolve.selector
+        bytes memory refused = abi.encodeWithSelector(
+            IUniversalResolver.UnsupportedResolverProfile.selector, resolver.resolve.selector
+        );
+        vm.expectRevert(refused);
+        resolver.resolve(dns("alice.fkey.eth"), nested);
+
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = nested;
+        (bool ok, bytes memory v) = ccipCall(
+            address(resolver),
+            abi.encodeCall(
+                resolver.resolve,
+                (dns("alice.fkey.eth"), abi.encodeCall(IMulticallable.multicall, (calls)))
             )
         );
-        resolver.resolve(dns("bob.fkey.eth"), nested);
+        assertTrue(ok);
+        assertEq(abi.decode(abi.decode(v, (bytes)), (bytes[]))[0], refused, "as a multicall item");
     }
 
     /// @dev The node-checked form checks every item, forwarded ones included, as ENS's
