@@ -98,9 +98,10 @@ UniversalResolver batches, unless ENS's batch gateway list tells the client to b
   its own, so the recipient never finds the payment (FK1's signature rules this out; scheme 1
   trusts the batch gateway here);
 - can fail an item. A failed item comes back as error data, marked only by its length (4 more than
-  a multiple of 32), so clients check that before decoding. `StealthResolver` wraps every
-  batch-gateway failure and keeps gateway-supplied bytes out of its errors, so a failed item never
-  reads as an address someone chose.
+  a multiple of 32; empty if the failure had no data), so clients check that before decoding.
+  `StealthResolver` wraps every batch-gateway failure, and neither it nor the verifiers put a word
+  the gateway chose into an error argument, so a failed item never reads as an address someone
+  chose.
 
 ### Who may write
 
@@ -310,7 +311,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 |---|---|---|
 | `StealthResolver` | 22,128 | 2,448 |
 | `Scheme1Verifier` | 1,657 | 22,919 |
-| `FluidkeyVerifier` | 5,803 | 18,773 |
+| `FluidkeyVerifier` | 5,767 | 18,809 |
 | `FluidkeySigners` | 927 | 23,649 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an

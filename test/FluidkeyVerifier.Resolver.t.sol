@@ -40,7 +40,7 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
     }
 
     /// @dev A Fluidkey signer's EIP-712 signature, as the unit tests build it.
-    function _sig(bytes32 structHash) internal view returns (bytes memory) {
+    function _sig(uint256 key, bytes32 structHash) internal view returns (bytes memory) {
         bytes32 domain = keccak256(
             abi.encode(
                 keccak256(
@@ -53,13 +53,18 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
             )
         );
         (uint8 sv, bytes32 r, bytes32 s) =
-            vm.sign(SIGNER_KEY, keccak256(abi.encodePacked(hex"1901", domain, structHash)));
+            vm.sign(key, keccak256(abi.encodePacked(hex"1901", domain, structHash)));
         return abi.encodePacked(r, s, sv);
     }
 
     /// @dev The Fluidkey gateway's verified response for `forNode` on Ethereum: the vector's
     ///      derivation and a signature over its Safe.
     function _signedDerivation(bytes32 forNode) internal view returns (bytes memory) {
+        return _signedDerivation(forNode, SIGNER_KEY);
+    }
+
+    /// @dev As above, signed by `key`.
+    function _signedDerivation(bytes32 forNode, uint256 key) internal view returns (bytes memory) {
         bytes32 structHash = keccak256(
             abi.encode(
                 keccak256(
@@ -71,7 +76,7 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
                 v.stealthAddress
             )
         );
-        return bytes.concat(v.verificationData, _sig(structHash));
+        return bytes.concat(v.verificationData, _sig(key, structHash));
     }
 
     /// @dev The Fluidkey gateway's unverified response for `forNode` on Ethereum.
@@ -92,7 +97,7 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
                 expires
             )
         );
-        return abi.encode(expires, _sig(structHash));
+        return abi.encode(expires, _sig(SIGNER_KEY, structHash));
     }
 
     function test_verified() public {
@@ -127,25 +132,32 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
         assertEq(bytes4(result), FluidkeyVerifier.UnknownSigner.selector);
     }
 
-    /// @dev In a multicall a failed item is returned as data. A valid derivation with a crafted
-    ///      signature fails as `UnknownSigner(0)`, so a client that decodes the item as an address
-    ///      without checking the error marker reads no address, not one the gateway chose.
+    /// @dev In a multicall a failed item is returned as data. A valid derivation signed by a key
+    ///      that is not a listed signer, or with a crafted signature, fails as `UnknownSigner` with
+    ///      no argument: a client that decodes the item as an address without checking the error
+    ///      marker reads no address, not the gateway's own or one it chose.
     function test_verified_multicallFailureCarriesNoGatewayWord() public {
         bytes32 s = bytes32(abi.encodePacked(bytes8(0xffffffffffffffff), makeAddr("x"), bytes4(0)));
-        gwClaimed = v.stealthAddress;
-        gwVerificationData = abi.encodePacked(v.verificationData, bytes32(uint256(1)), s, uint8(27));
+        bytes[2] memory vds = [
+            _signedDerivation(aliceNode, 0xBAD),
+            abi.encodePacked(v.verificationData, bytes32(uint256(1)), s, uint8(27))
+        ];
         bytes[] memory calls = new bytes[](1);
         calls[0] = abi.encodeCall(IAddrResolver.addr, (aliceNode));
-        (bool ok, bytes memory r) = ccipCall(
-            address(resolver),
-            abi.encodeCall(
-                resolver.resolve,
-                (dns("alice.fkey.eth"), abi.encodeCall(IMulticallable.multicall, (calls)))
-            )
-        );
-        assertTrue(ok);
-        bytes memory item = abi.decode(abi.decode(r, (bytes)), (bytes[]))[0];
-        assertEq(item, abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector, address(0)));
+        for (uint256 i; i < vds.length; ++i) {
+            gwClaimed = v.stealthAddress;
+            gwVerificationData = vds[i];
+            (bool ok, bytes memory r) = ccipCall(
+                address(resolver),
+                abi.encodeCall(
+                    resolver.resolve,
+                    (dns("alice.fkey.eth"), abi.encodeCall(IMulticallable.multicall, (calls)))
+                )
+            );
+            assertTrue(ok);
+            bytes memory item = abi.decode(abi.decode(r, (bytes)), (bytes[]))[0];
+            assertEq(item, abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector));
+        }
     }
 
     /// @dev A name that lists the ENSIP-19 default answers it verified: the signature binds the
@@ -164,7 +176,7 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
             )
         );
         gwClaimed = v.stealthAddress;
-        gwVerificationData = bytes.concat(v.verificationData, _sig(structHash));
+        gwVerificationData = bytes.concat(v.verificationData, _sig(SIGNER_KEY, structHash));
         (bool ok, bytes memory result) = ccipCall(
             address(resolver),
             abi.encodeCall(

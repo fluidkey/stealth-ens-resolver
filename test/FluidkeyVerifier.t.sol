@@ -318,9 +318,7 @@ contract FluidkeyVerifierTest is Test {
         bytes memory vd = bytes.concat(
             v.verificationData, _signVerified(0xBAD, resolver, node, 60, v.stealthAddress)
         );
-        vm.expectRevert(
-            abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector, vm.addr(0xBAD))
-        );
+        vm.expectRevert(abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector));
         _verify(v.metaAddress, vd);
     }
 
@@ -346,8 +344,8 @@ contract FluidkeyVerifierTest is Test {
         assertEq(_verified(resolver, node, 60, meta, unverifiedType), unknown, "type");
     }
 
-    /// @dev A malformed signature (high s, bad v) is `UnknownSigner(0)`: the error carries no word
-    ///      the gateway chose, even if the zero address were ever listed as a signer.
+    /// @dev A malformed signature (high s, bad v) is `UnknownSigner`, even if the zero address were
+    ///      ever listed as a signer.
     function test_verified_malformedSignature() public {
         FluidkeyVectors.Vector memory v = vectors[4];
         signers.setSigner(address(0), true);
@@ -358,9 +356,7 @@ contract FluidkeyVerifierTest is Test {
             abi.encodePacked(bytes32(uint256(1)), bytes32(uint256(1)), uint8(29))
         ];
         for (uint256 i; i < sigs.length; ++i) {
-            vm.expectRevert(
-                abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector, address(0))
-            );
+            vm.expectRevert(abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector));
             _verify(v.metaAddress, bytes.concat(v.verificationData, sigs[i]));
         }
     }
@@ -431,7 +427,7 @@ contract FluidkeyVerifierTest is Test {
         bytes memory vd = _signed(SIGNER_KEY, claimed, expires);
         vm.warp(expires + 1);
         vm.prank(resolver);
-        vm.expectRevert(abi.encodeWithSelector(FluidkeyVerifier.SignatureExpired.selector, expires));
+        vm.expectRevert(abi.encodeWithSelector(FluidkeyVerifier.SignatureExpired.selector));
         verifier.verify(node, 60, "", vd, claimed);
     }
 
@@ -445,7 +441,7 @@ contract FluidkeyVerifierTest is Test {
             _unverified(resolver, node, 60, _signed(SIGNER_KEY, claimed, limit), claimed), bytes4(0)
         );
         vm.prank(resolver);
-        vm.expectRevert(abi.encodeWithSelector(FluidkeyVerifier.ExpiryTooFar.selector, limit + 1));
+        vm.expectRevert(abi.encodeWithSelector(FluidkeyVerifier.ExpiryTooFar.selector));
         verifier.verify(node, 60, "", _signed(SIGNER_KEY, claimed, limit + 1), claimed);
     }
 
@@ -453,9 +449,7 @@ contract FluidkeyVerifierTest is Test {
         address claimed = makeAddr("safe");
         uint64 expires = uint64(block.timestamp + 300);
         vm.prank(resolver);
-        vm.expectRevert(
-            abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector, vm.addr(0xBAD))
-        );
+        vm.expectRevert(abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector));
         verifier.verify(node, 60, "", _signed(0xBAD, claimed, expires), claimed);
     }
 
@@ -493,7 +487,7 @@ contract FluidkeyVerifierTest is Test {
         assertEq(_unverified(resolver, node, 60, verifiedType, claimed), unknown, "type");
     }
 
-    /// @dev The high-s twin of a valid signature is refused as malformed: `UnknownSigner(0)`.
+    /// @dev The high-s twin of a valid signature is refused as malformed: `UnknownSigner`.
     function test_unverified_malleableSignature() public {
         address claimed = makeAddr("safe");
         uint64 expires = uint64(block.timestamp + 300);
@@ -503,7 +497,7 @@ contract FluidkeyVerifierTest is Test {
         uint8 v = uint8(sig[64]);
         bytes memory twin = abi.encodePacked(r, bytes32(N - s), v == 27 ? uint8(28) : uint8(27));
         vm.prank(resolver);
-        vm.expectRevert(abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector, address(0)));
+        vm.expectRevert(abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector));
         verifier.verify(node, 60, "", abi.encode(expires, twin), claimed);
     }
 

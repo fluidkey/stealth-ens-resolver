@@ -106,14 +106,17 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
     /// @notice The supplied shared secret point is not the ephemeral key times the spending key.
     error InvalidSharedSecret();
 
-    /// @notice The signed response expired at `expires`.
-    error SignatureExpired(uint64 expires);
+    /// @notice The signed response expired. No argument, like the two errors below: in a multicall
+    ///         a failed item is returned as data, and a gateway-chosen word (its `expires`, or the
+    ///         address of a key it holds) could read as an address to a client that skips the
+    ///         error marker.
+    error SignatureExpired();
 
     /// @notice The signed response's `expires` is more than `MAX_VALIDITY` ahead.
-    error ExpiryTooFar(uint64 expires);
+    error ExpiryTooFar();
 
-    /// @notice `signer` is not a Fluidkey gateway signer; zero if the signature is malformed.
-    error UnknownSigner(address signer);
+    /// @notice The signature is malformed or its signer is not a Fluidkey gateway signer.
+    error UnknownSigner();
 
     ////////////////////////////////////////////////////////////////////////
     // Initialization
@@ -257,8 +260,8 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
         address claimed
     ) internal view returns (address) {
         (uint64 expires, bytes memory signature) = abi.decode(verificationData, (uint64, bytes));
-        if (block.timestamp > expires) revert SignatureExpired(expires);
-        if (expires > block.timestamp + MAX_VALIDITY) revert ExpiryTooFar(expires);
+        if (block.timestamp > expires) revert SignatureExpired();
+        if (expires > block.timestamp + MAX_VALIDITY) revert ExpiryTooFar();
         _checkSigner(
             keccak256(
                 abi.encode(
@@ -270,16 +273,14 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
         return claimed;
     }
 
-    /// @dev Reverts unless a current Fluidkey gateway signer signed the EIP-712 `structHash`. A
-    ///      malformed signature reverts `UnknownSigner(address(0))`, not OpenZeppelin's errors,
-    ///      whose arguments come from the signature: in a multicall the error is returned as data,
-    ///      and a gateway-chosen word could read as an address to a client that skips the error
-    ///      marker.
+    /// @dev Reverts `UnknownSigner` unless a current Fluidkey gateway signer signed the EIP-712
+    ///      `structHash`. `tryRecover`, not `recover`: OpenZeppelin's errors carry arguments taken
+    ///      from the signature (see `SignatureExpired`).
     function _checkSigner(bytes32 structHash, bytes memory signature) internal view {
         (address signer, ECDSA.RecoverError err,) =
             ECDSA.tryRecover(_hashTypedDataV4(structHash), signature);
         if (err != ECDSA.RecoverError.NoError || !SIGNERS.isSigner(signer)) {
-            revert UnknownSigner(signer);
+            revert UnknownSigner();
         }
     }
 }
