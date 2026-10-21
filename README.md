@@ -279,10 +279,11 @@ Both modes require a signature by an account that `FluidkeySigners` lists (EIP-7
   then, also after the name changes hands. The gateway signs well inside the limit, such as 5
   minutes, to allow for clock skew and lagging RPCs.
 
-`FluidkeySigners` is owned by Fluidkey so signing keys rotate without redeploying. In verified mode
-a signer can refuse a derivation but cannot make the verifier return a Safe the record does not
-derive. The scheme ID, FK1 (`0x464B31`, 4606769), is a constructor argument: the scheme's ERC
-declares it.
+`FluidkeySigners` is owned by Fluidkey so signing keys rotate without redeploying. Its ownership
+can be transferred (in two steps) but not renounced, which would freeze the signer set, leaked keys
+included. In verified mode a signer can refuse a derivation but cannot make the verifier return a
+Safe the record does not derive. The scheme ID, FK1 (`0x464B31`, 4606769), is a constructor
+argument: the scheme's ERC declares it.
 
 Fluidkey's gateway answers with the Safe address and, if the name has a record (read onchain as the
 callback reads it), `e || S.x || S.y` and the signature; otherwise the signed expiry. Records
@@ -311,7 +312,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 | `StealthResolver` | 22,128 | 2,448 |
 | `Scheme1Verifier` | 1,657 | 22,919 |
 | `FluidkeyVerifier` | 5,803 | 18,773 |
-| `FluidkeySigners` | 894 | 23,682 |
+| `FluidkeySigners` | 927 | 23,649 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
 `eth_call` costs; verified-mode numbers use a mock verifier, and the verifier's own cost is listed

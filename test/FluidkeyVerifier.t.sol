@@ -525,6 +525,13 @@ contract FluidkeyVerifierTest is Test {
         signers.setSigner(stranger, true);
     }
 
+    /// @dev The owner cannot renounce: the signer set, leaked keys included, would be frozen.
+    function test_signers_renounceDisabled() public {
+        vm.expectRevert(FluidkeySigners.RenounceDisabled.selector);
+        signers.renounceOwnership();
+        assertEq(signers.owner(), address(this));
+    }
+
     function test_signers_setAndTwoStepTransfer() public {
         address signer = makeAddr("signer");
         vm.expectEmit(address(signers));
