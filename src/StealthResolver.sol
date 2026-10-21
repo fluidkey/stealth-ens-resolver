@@ -158,10 +158,6 @@ contract StealthResolver is
     ///         cannot be walked through the registry to the name's authority.
     error ResolveOnly(bytes4 selector);
 
-    /// @notice `verifyStealthResolution` was asked for a name whose resolver is `resolver`, not this
-    ///         one: a record left here is no longer the name's.
-    error NotNamesResolver(address resolver);
-
     /// @notice The gateway's address does not derive from the name's meta-address. No arguments:
     ///         in a multicall a failed item is returned as data, and an argument the gateway
     ///         chose could read as an address to a client that skips the error marker.
@@ -340,10 +336,10 @@ contract StealthResolver is
     }
 
     /// @inheritdoc IStealthResolver
-    /// @dev ENSIP-30 Section 5. As `gatewayURLs`: through `resolve(name, data)` only, directly or
-    ///      through the UniversalResolver (no CCIP-Read is involved). Out-of-flow verifiers and
-    ///      contracts consuming stealth resolutions call it that way. Called directly, reverts
-    ///      `ResolveOnly`.
+    /// @dev ENSIP-30 Section 5. As `gatewayURLs`: through `resolve(name, data)` only (no CCIP-Read
+    ///      is involved). Out-of-flow verifiers and contracts consuming stealth resolutions call it
+    ///      through the UniversalResolver, which routes to the name's current resolver; this
+    ///      contract does not check that it still is. Called directly, reverts `ResolveOnly`.
     function verifyStealthResolution(bytes32, uint256, address, bytes calldata)
         external
         pure
@@ -460,10 +456,6 @@ contract StealthResolver is
             return abi.encode(c.gatewayURLs);
         }
         if (selector == IStealthResolver.verifyStealthResolution.selector) {
-            // Called directly, a consumer could otherwise accept a record the name abandoned
-            // when it moved to another resolver; through the UniversalResolver this holds anyway.
-            (, address current,,) = LibResolution.findResolver(ROOT_REGISTRY, name, 0);
-            if (current != address(this)) revert NotNamesResolver(current);
             (, uint256 vCoinType, address stealthAddress, bytes memory verificationData) =
                 abi.decode(data[4:], (bytes32, uint256, address, bytes));
             return abi.encode(
