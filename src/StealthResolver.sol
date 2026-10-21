@@ -147,6 +147,10 @@ contract StealthResolver is
     ///         answer for it is not accepted.
     error ChainNotStealth(uint256 coinType);
 
+    /// @notice The name's authority or gateway URLs changed since the lookup: the answer is not
+    ///         accepted.
+    error StaleLookup();
+
     /// @notice The node in the resolver calldata is not the namehash of the DNS-encoded name.
     error NodeMismatch(bytes32 node, bytes32 nameNode);
 
@@ -393,21 +397,26 @@ contract StealthResolver is
     /// @notice ERC-3668 callback for address records.
     /// @dev ENSIP-30 Section 4, step 3: verified if `name` has a meta-address, read here; otherwise
     ///      the verifier decides. Reverts if the coin type is no longer stealth for `name` (chain
-    ///      removed or gateway cleared since the lookup). The zero address is an unset record.
+    ///      removed or gateway cleared since the lookup), and if its authority or gateway URLs
+    ///      changed since (`StaleLookup`): the answer is bound to the lookup, as ENS's
+    ///      UniversalResolver sends a callback to the resolver it looked up. The zero address is
+    ///      an unset record.
     /// @param response `abi.encode(address stealthAddress, bytes verificationData)` from the gateway.
-    /// @param extraData `abi.encode(name, coinType, legacy)`; `legacy` = `addr(bytes32)` was queried.
+    /// @param extraData `abi.encode(name, coinType, legacy, binding)`; `legacy` = `addr(bytes32)`
+    ///        was queried; `binding` = the authority and gateway URLs of the lookup, hashed.
     /// @return The ABI-encoded result of the queried address profile.
     function resolveStealthCallback(bytes calldata response, bytes calldata extraData)
         external
         view
         returns (bytes memory)
     {
-        (bytes memory name, uint256 coinType, bool legacy) =
-            abi.decode(extraData, (bytes, uint256, bool));
+        (bytes memory name, uint256 coinType, bool legacy, bytes32 binding) =
+            abi.decode(extraData, (bytes, uint256, bool, bytes32));
         (address claimed, bytes memory verificationData) = abi.decode(response, (address, bytes));
         bytes32 node = NameCoder.namehash(name, 0);
         bytes32 key = _context(name).key;
         if (!_isStealth(key, coinType)) revert ChainNotStealth(coinType);
+        if (_lookupBinding(key) != binding) revert StaleLookup();
         address resolved = _metaAddresses[key][node].length == 0
             ? VERIFIER.verify(node, coinType, "", verificationData, claimed)
             : _verifyResolution(key, node, coinType, claimed, verificationData);
@@ -473,7 +482,7 @@ contract StealthResolver is
                 c.gatewayURLs,
                 abi.encodeCall(IExtendedResolver.resolve, (name, data)),
                 this.resolveStealthCallback.selector,
-                abi.encode(name, coinType, legacy)
+                abi.encode(name, coinType, legacy, _lookupBinding(ctx.key))
             );
         }
         address recordsResolver = c.recordsResolver;
@@ -550,6 +559,11 @@ contract StealthResolver is
         uint256 status;
         (status,,,, resource) = abi.decode(v, (uint256, uint256, uint256, uint256, uint256));
         registered = status != uint256(IPermissionedRegistry.Status.AVAILABLE);
+    }
+
+    /// @dev What a lookup is bound to: the authority `key` and the gateway URLs it was sent to.
+    function _lookupBinding(bytes32 key) internal view returns (bytes32) {
+        return keccak256(abi.encode(key, _configs[key].gatewayURLs));
     }
 
     /// @dev Whether address queries for `coinType` go to the gateway under the authority `key`:

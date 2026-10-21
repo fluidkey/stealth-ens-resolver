@@ -88,12 +88,21 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         assertEq(p.urls[0], STEALTH_GW);
         assertEq(p.callData, abi.encodeCall(IExtendedResolver.resolve, (dns("bob.fkey.eth"), data)));
         assertEq(p.callbackFunction, resolver.resolveStealthCallback.selector);
-        assertEq(p.extraData, abi.encode(dns("bob.fkey.eth"), COIN_ETH, true));
+        (bytes memory name, uint256 coinType, bool legacy, bytes32 binding) =
+            abi.decode(p.extraData, (bytes, uint256, bool, bytes32));
+        assertEq(name, dns("bob.fkey.eth"));
+        assertEq(coinType, COIN_ETH);
+        assertTrue(legacy);
+        assertTrue(binding != bytes32(0));
     }
 
     function test_lookupShape_coinType() public view {
         EIP3668.Params memory p = _lookupCoin("bob.fkey.eth", COIN_BASE);
-        assertEq(p.extraData, abi.encode(dns("bob.fkey.eth"), COIN_BASE, false));
+        (bytes memory name, uint256 coinType, bool legacy,) =
+            abi.decode(p.extraData, (bytes, uint256, bool, bytes32));
+        assertEq(name, dns("bob.fkey.eth"));
+        assertEq(coinType, COIN_BASE);
+        assertFalse(legacy);
     }
 
     function test_ownGatewayWinsOverInherited() public {
@@ -215,6 +224,45 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         (bool ok, bytes memory v) = callback(p, abi.encode(makeAddr("any"), VD));
         assertFalse(ok);
         assertEq(v, abi.encodeWithSelector(StealthResolver.ChainNotStealth.selector, COIN_ETH));
+    }
+
+    /// @dev The answer is bound to the gateway URLs and the authority the lookup was sent to: new
+    ///      URLs, or the authority's state cleared, refuse it. The same URLs again accept it.
+    function test_stealthPathChangedBetweenLookupAndCallback() public {
+        EIP3668.Params memory p = _lookup("bob.fkey.eth");
+        bytes memory stale = abi.encodeWithSelector(StealthResolver.StaleLookup.selector);
+        setConfig(fluidkey, "fkey.eth", address(fkeyRecords), "https://gw.other");
+        (bool ok, bytes memory v) = callback(p, abi.encode(makeAddr("any"), VD));
+        assertFalse(ok);
+        assertEq(v, stale, "new URLs");
+
+        setConfig(fluidkey, "fkey.eth", address(fkeyRecords), STEALTH_GW);
+        (ok,) = callback(p, abi.encode(makeAddr("any"), VD));
+        assertTrue(ok, "the same URLs again");
+
+        vm.prank(fluidkey);
+        resolver.clearRecords(dns("fkey.eth"));
+        setConfig(fluidkey, "fkey.eth", address(fkeyRecords), STEALTH_GW);
+        setChain(fluidkey, "fkey.eth", COIN_ETH, true);
+        (ok, v) = callback(p, abi.encode(makeAddr("any"), VD));
+        assertFalse(ok);
+        assertEq(v, stale, "state cleared");
+    }
+
+    /// @dev A registration that lapses mid-flight makes the parent the authority. Its gateway did
+    ///      not get the lookup, so the answer, here a lying one in the parent's unverified mode,
+    ///      is refused even though the parent lists the chain with the same URLs.
+    function test_authorityChangedBetweenLookupAndCallback() public {
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), STEALTH_GW);
+        setChain(alice, "alice.fkey.eth", COIN_ETH, true);
+        EIP3668.Params memory p = _lookup("alice.fkey.eth");
+        ethRegistry.grantRootRoles(RegistryRolesLib.ROLE_RENEW, address(this));
+        ethRegistry.renew(uint256(keccak256("fkey")), expiry + 1000 days);
+        vm.warp(expiry);
+        assertTrue(resolver.isStealthChain(dns("alice.fkey.eth"), COIN_ETH), "parent's gateway");
+        (bool ok, bytes memory v) = callback(p, abi.encode(makeAddr("attacker"), VD));
+        assertFalse(ok);
+        assertEq(v, abi.encodeWithSelector(StealthResolver.StaleLookup.selector));
     }
 
     /// @dev The record is served only for listed chains.
