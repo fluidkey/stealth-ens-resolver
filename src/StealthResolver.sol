@@ -46,7 +46,9 @@ import {IStealthVerifier} from "./interfaces/IStealthVerifier.sol";
 ///      unregistered (wildcard) name's record is written by its nearest registered ancestor. A
 ///      reserved name counts as registered: it exists in the registry in its own right. State is
 ///      keyed by that authority's registry resource, which ENSv2 renews when an expired name is
-///      registered again, so a previous holder's state is never read.
+///      registered again, so a previous holder's state is never read. A transfer keeps the
+///      resource, and the state with it, as ENS's resolvers keep a name's records; the new holder
+///      clears it with `clearRecords`.
 ///
 ///      Per query for a DNS-encoded name N, with the config of N's authority (nothing is inherited
 ///      past a registered name, so an ancestor never governs a registered descendant):
@@ -77,7 +79,8 @@ contract StealthResolver is
 
     /// @dev What the registry says about a name (`_context`).
     struct NameState {
-        /// @dev Storage key of the authority, `keccak256(registry, resource)`; zero if none.
+        /// @dev Storage key of the authority, from its registry, resource and version; zero if
+        ///      none.
         bytes32 key;
         /// @dev The registry holding the authority's token.
         IPermissionedRegistry registry;
@@ -110,6 +113,10 @@ contract StealthResolver is
     ///      the nearest registered name at or above `node`.
     mapping(bytes32 key => mapping(bytes32 node => bytes)) private _metaAddresses;
 
+    /// @dev How many times an authority's state was cleared (`clearRecords`), by
+    ///      `keccak256(registry, resource)`; part of the authority key.
+    mapping(bytes32 resourceKey => uint64 version) private _versions;
+
     ////////////////////////////////////////////////////////////////////////
     // Events and errors
     ////////////////////////////////////////////////////////////////////////
@@ -122,6 +129,10 @@ contract StealthResolver is
 
     /// @notice The meta-address record of `node` changed.
     event MetaAddressChanged(bytes32 indexed node, bytes name, bytes value);
+
+    /// @notice All state of `node` was cleared (`clearRecords`). The event of ENS's
+    ///         `IVersionableResolver`.
+    event VersionChanged(bytes32 indexed node, uint64 newVersion);
 
     /// @notice `account` may not write this state of `name`.
     error Unauthorized(bytes name, address account);
@@ -257,6 +268,20 @@ contract StealthResolver is
         bytes32 node = NameCoder.namehash(name, 0);
         _metaAddresses[ctx.key][node] = value;
         emit MetaAddressChanged(node, name, value);
+    }
+
+    /// @notice Clears all state of the registered name `name`: its config, its chain list and every
+    ///         meta-address record written under it, its wildcard names' included.
+    /// @dev ENS's `clearRecords(node)` (ENSv1 `PublicResolver`, `PublicResolverV2`), by name and for
+    ///      everything the name governs. State stays with a name when its token is transferred, as
+    ///      records do in ENS's resolvers, so a new holder drops what the previous one left with
+    ///      one call. Same authority as `setConfig`.
+    /// @param name The DNS-encoded name.
+    function clearRecords(bytes calldata name) external {
+        NameState memory ctx = _context(name);
+        if (!ctx.exact || !_isAuthority(ctx, msg.sender)) revert Unauthorized(name, msg.sender);
+        uint64 version = ++_versions[keccak256(abi.encode(ctx.registry, ctx.resource))];
+        emit VersionChanged(NameCoder.namehash(name, 0), version);
     }
 
     /// @notice Whether `account` may set the config of `name`: `name` is registered in an ENSv2
@@ -498,7 +523,8 @@ contract StealthResolver is
             if (address(parent) == address(0)) continue;
             (bool registered, uint256 resource) = _registered(parent, labelHash);
             if (!registered) continue;
-            ctx.key = keccak256(abi.encode(parent, resource));
+            bytes32 resourceKey = keccak256(abi.encode(parent, resource));
+            ctx.key = keccak256(abi.encode(resourceKey, _versions[resourceKey]));
             ctx.registry = IPermissionedRegistry(address(parent));
             ctx.resource = resource;
             ctx.exact = i == 0;

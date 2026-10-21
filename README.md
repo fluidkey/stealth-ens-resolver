@@ -100,11 +100,13 @@ Registering it keeps its resource, and with it its state.
 | `setConfig(name, recordsResolver, gatewayURLs)` | registered names only | the name's own authority |
 | `setChains(name, coinTypes, enabled)` | registered names only | the name's own authority |
 | `setMetaAddress(name, value)` | any name below a registered one | its authority: the name itself if registered, otherwise its nearest registered ancestor |
+| `clearRecords(name)` | registered names only | the name's own authority |
 
 A parent such as `fkey.eth` therefore writes the meta-addresses of its wildcard usernames, which exist only
 in its gateway. Once a username is registered, only its holder writes its record, and a record the
-parent wrote before is no longer read. A records resolver must be a contract other than
-`StealthResolver`.
+parent wrote before is no longer read. `clearRecords(name)` drops all of a registered name's state at
+once: its config, its chain list and every record written under it, its wildcard names' included. A
+records resolver must be a contract other than `StealthResolver`.
 
 **Trust.** A name is governed by its authority: records, gateway, chain list and, in verified mode,
 the meta-address it is verified against. This is the ENSIP's trust model for wildcard names. A
@@ -113,10 +115,15 @@ reaches it: no gateway URLs means no gateway, and its static address records are
 To use a parent's gateway, a registered name sets the same URLs itself. Its owner should be the only
 holder of `ROLE_SET_RESOLVER` on it.
 
-**Re-registration.** State is keyed by the authority's ENSv2 resource, which the registry renews
-when an expired name is registered again, to anyone. A previous holder's config and records are
-therefore never read, and the new holder starts empty. An expired name that is not registered again
-resolves as a wildcard name of its parent.
+**Re-registration and transfer.** State is keyed by the authority's ENSv2 resource, which the
+registry renews when an expired name is registered again, to anyone. A previous holder's config and
+records are therefore never read, and the new holder starts empty. A transfer keeps the resource,
+and the state with it, as ENS's resolvers keep a name's records: the buyer drops what the seller
+left with one `clearRecords(name)`, as with `clearRecords(node)` on ENS's `PublicResolver`. The
+same holds when a reserved name is registered. An expired name that is not registered again resolves
+as a wildcard name of its parent, and a record the parent wrote for it before it was registered is
+served again, as ENS falls back to the parent's resolver. A parent therefore clears a username's
+wildcard record before registering the username; it cannot while the username is registered.
 
 **Section 5 by name.** `gatewayURLs(node)` and `verifyStealthResolution(node, ...)` are answered
 only through ENSIP-10 `resolve(name, data)`, directly or through the UniversalResolver, which wraps
@@ -139,8 +146,9 @@ after a re-registration until the new holder writes.
 4. `setMetaAddress(name, value)`.
 5. Set the name's resolver in its ENSv2 registry to `StealthResolver`.
 
-A smart account can batch all five. For a wildcard username, the parent's holder calls
-`setMetaAddress` for the username's name; the parent's records resolver can be an offchain one.
+A smart account can batch all five. For a name acquired by transfer, call `clearRecords(name)`
+first. For a wildcard username, the parent's holder calls `setMetaAddress` for the username's name;
+the parent's records resolver can be an offchain one.
 
 ### Scheme 1
 
@@ -270,7 +278,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 20,825 | 3,751 |
+| `StealthResolver` | 21,371 | 3,205 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
 | `FluidkeyVerifier` | 6,071 | 18,505 |
 | `FluidkeySigners` | 894 | 23,682 |
@@ -283,19 +291,19 @@ read cost.
 
 | Path | Gas |
 |---|---|
-| `resolve` wildcard name, address, `OffchainLookup` revert | 40,934 |
-| `resolve` registered name, address, `OffchainLookup` revert | 23,332 |
-| `resolveStealthCallback`, unverified (wildcard name) | 43,769 + verifier |
-| `resolveStealthCallback`, verified (registered name) | 29,193 + verifier |
-| `resolve` registered name, `verifyStealthResolution` | 26,920 + verifier |
+| `resolve` wildcard name, address, `OffchainLookup` revert | 43,264 |
+| `resolve` registered name, address, `OffchainLookup` revert | 23,662 |
+| `resolveStealthCallback`, unverified (wildcard name) | 46,121 + verifier |
+| `resolveStealthCallback`, verified (registered name) | 29,545 + verifier |
+| `resolve` registered name, `verifyStealthResolution` | 27,249 + verifier |
 | `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,122 |
 | `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,709 |
 | `FluidkeyVerifier.verify`, unverified mode, signed | 14,993 |
-| `resolve` text, forwarded to a `PermissionedResolver` | 43,382 |
+| `resolve` text, forwarded to a `PermissionedResolver` | 43,712 |
 | `resolve` text on the `PermissionedResolver` directly (reference) | 6,425 |
-| `setConfig`, records resolver and one URL (transaction) | 140,998 |
-| `setChains`, one chain (transaction) | 89,045 |
-| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 156,527 |
+| `setConfig`, records resolver and one URL (transaction) | 143,394 |
+| `setChains`, one chain (transaction) | 91,397 |
+| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 158,924 |
 
 ## Build and test
 

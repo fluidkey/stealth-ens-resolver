@@ -157,6 +157,82 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
         assertEq(_record("vip.club.eth"), META, "kept on registration");
     }
 
+    /// @dev A transfer keeps the state, as ENS's resolvers keep a name's records: the seller's
+    ///      config, chain list and records stay, wildcard names' included, until the buyer clears
+    ///      them with `clearRecords`.
+    function test_transfer_keepsStateUntilCleared() public {
+        address seller = makeAddr("seller");
+        address buyer = makeAddr("buyer");
+        vm.prank(fluidkey);
+        uint256 tokenId = fkeyRegistry.register(
+            "shop",
+            seller,
+            IRegistry(address(0)),
+            address(resolver),
+            RegistryRolesLib.ROLE_SET_RESOLVER | RegistryRolesLib.ROLE_CAN_TRANSFER_ADMIN,
+            expiry
+        );
+        setConfig(seller, "shop.fkey.eth", address(0), STEALTH_GW);
+        setChain(seller, "shop.fkey.eth", COIN_ETH, true);
+        setMeta(seller, "shop.fkey.eth", META);
+        setMeta(seller, "pay.shop.fkey.eth", META);
+        vm.prank(seller);
+        fkeyRegistry.safeTransferFrom(seller, buyer, tokenId, 1, "");
+
+        assertEq(_record("pay.shop.fkey.eth"), META, "kept");
+        assertFalse(resolver.canSetConfig(dns("shop.fkey.eth"), seller), "seller locked out");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                StealthResolver.Unauthorized.selector, dns("shop.fkey.eth"), seller
+            )
+        );
+        vm.prank(seller);
+        resolver.clearRecords(dns("shop.fkey.eth"));
+
+        vm.expectEmit(address(resolver));
+        emit StealthResolver.VersionChanged(node("shop.fkey.eth"), 1);
+        vm.prank(buyer);
+        resolver.clearRecords(dns("shop.fkey.eth"));
+        assertFalse(resolver.isStealthChain(dns("shop.fkey.eth"), COIN_ETH), "chain list cleared");
+        bytes memory call = abi.encodeCall(IStealthResolver.gatewayURLs, (node("shop.fkey.eth")));
+        assertEq(
+            abi.decode(resolver.resolve(dns("shop.fkey.eth"), call), (string[])).length,
+            0,
+            "config cleared"
+        );
+        setChain(buyer, "shop.fkey.eth", COIN_ETH, true);
+        assertEq(_record("shop.fkey.eth").length, 0, "record cleared");
+        assertEq(_record("pay.shop.fkey.eth").length, 0, "wildcard record cleared");
+        setMeta(buyer, "shop.fkey.eth", META);
+        assertEq(_record("shop.fkey.eth"), META, "the buyer writes afresh");
+    }
+
+    /// @dev Only the authority of a registered name clears, and clearing a parent drops every
+    ///      wildcard username's record with its own state.
+    function test_clearRecords_authorityOfRegisteredName() public {
+        setMeta(fluidkey, "bob.fkey.eth", META);
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.Unauthorized.selector, dns("fkey.eth"), stranger)
+        );
+        vm.prank(stranger);
+        resolver.clearRecords(dns("fkey.eth"));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                StealthResolver.Unauthorized.selector, dns("bob.fkey.eth"), fluidkey
+            )
+        );
+        vm.prank(fluidkey);
+        resolver.clearRecords(dns("bob.fkey.eth")); // a wildcard name: clear its record instead
+
+        assertEq(_record("bob.fkey.eth"), META);
+        vm.prank(fluidkey);
+        resolver.clearRecords(dns("fkey.eth"));
+        setChain(fluidkey, "fkey.eth", COIN_ETH, true);
+        assertEq(_record("bob.fkey.eth").length, 0, "every username's record");
+        (address r,) = resolver.getResolver(dns("bob.fkey.eth"));
+        assertEq(r, address(0), "and the config");
+    }
+
     /// @dev Role changes regenerate the token but keep the resource: state is kept.
     function test_roleChange_keepsState() public {
         setUpAliceVerified(COIN_ETH);
