@@ -5,6 +5,7 @@ import {CCIPBatcher} from "@ens/contracts/ccipRead/CCIPBatcher.sol";
 import {EIP3668} from "@ens/contracts/ccipRead/EIP3668.sol";
 import {IMulticallable} from "@ens/contracts/resolvers/IMulticallable.sol";
 import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol";
+import {IAddressResolver} from "@ens/contracts/resolvers/profiles/IAddressResolver.sol";
 import {IContentHashResolver} from "@ens/contracts/resolvers/profiles/IContentHashResolver.sol";
 import {IDataResolver} from "@ens/contracts/resolvers/profiles/IDataResolver.sol";
 import {ITextResolver} from "@ens/contracts/resolvers/profiles/ITextResolver.sol";
@@ -113,6 +114,29 @@ contract StealthResolverE2ETest is StealthResolverFixture {
         bytes[] memory results = abi.decode(abi.decode(v, (bytes)), (bytes[]));
         assertEq(abi.decode(results[0], (string)), "ipfs://bob");
         assertEq(abi.decode(results[1], (address)), gwClaimed);
+    }
+
+    /// @dev A multicall nested in a multicall is batched again, and its address items still take
+    ///      the gateway path: they cannot reach a static address in the records resolver.
+    function test_multicall_nestedStaysOnGatewayPath() public {
+        vm.prank(fluidkey);
+        fkeyRecords.setAddress(dns("bob.fkey.eth"), COIN_ETH, abi.encodePacked(address(0xBEEF)));
+        gwClaimed = makeAddr("chosen");
+        gwVerificationData = "ok";
+        bytes[] memory inner = new bytes[](2);
+        inner[0] = abi.encodeCall(IAddrResolver.addr, (bobNode));
+        inner[1] = abi.encodeCall(IAddressResolver.addr, (bobNode, COIN_ETH));
+        bytes[] memory outer = new bytes[](1);
+        outer[0] = _multicall(inner);
+        (bool ok, bytes memory v) = ccipCall(
+            address(resolver),
+            abi.encodeCall(resolver.resolve, (dns("bob.fkey.eth"), _multicall(outer)))
+        );
+        assertTrue(ok);
+        bytes[] memory results = abi.decode(abi.decode(v, (bytes)), (bytes[]));
+        bytes[] memory nested = abi.decode(results[0], (bytes[]));
+        assertEq(abi.decode(nested[0], (address)), gwClaimed);
+        assertEq(abi.decode(nested[1], (bytes)), abi.encodePacked(gwClaimed));
     }
 
     /// @dev A batch gateway may fail an item, but never choose what it reads as: its bytes are
