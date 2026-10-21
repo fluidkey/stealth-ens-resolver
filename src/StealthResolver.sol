@@ -150,8 +150,9 @@ contract StealthResolver is
     /// @notice Only EVM coin types can be on a chain list: the verifier answers with an EVM address.
     error InvalidChain(uint256 coinType);
 
-    /// @notice `coinType` is no longer on the chain list or the gateway was removed: the gateway's
-    ///         answer for it is not accepted.
+    /// @notice `coinType` is not stealth under the name's authority at callback time (the chain
+    ///         or the gateway was removed, or the authority changed and does not list it): the
+    ///         gateway's answer for it is not accepted.
     error ChainNotStealth(uint256 coinType);
 
     /// @notice The name's authority or gateway URLs changed since the lookup: the answer is not
@@ -302,8 +303,8 @@ contract StealthResolver is
         emit VersionChanged(NameCoder.namehash(name, 0), version);
     }
 
-    /// @notice Whether `account` may set the config of `name`: `name` is registered in an ENSv2
-    ///         `PermissionedRegistry` below a top-level name and `account` holds
+    /// @notice Whether `account` may set the config of `name`: `name` is registered or reserved in
+    ///         an ENSv2 `PermissionedRegistry` below a top-level name and `account` holds
     ///         `ROLE_SET_RESOLVER` on its token (resource or registry-wide), as for
     ///         `PermissionedRegistry.setResolver`.
     /// @dev ENSIP-30 Section 5: write authorization follows the rules for the name's resolver.

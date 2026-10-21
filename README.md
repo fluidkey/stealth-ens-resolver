@@ -54,30 +54,29 @@ scheme's key in canonical form is the record; other spellings (`[060]`, `[0x3c]`
 forwarded. The stealth key written into the records resolver with standard tooling is not the record
 and is ignored; another scheme's key is an ordinary record of the records resolver.
 
-**Chain lists.** One meta-address serves every listed chain (the ENSIP's rationale allows storing the
-key material once and exposing it under each coin type enabled for the name). Only EVM coin types can
-be listed, since the verifier answers with an EVM address. A name is stealth on listed chains and
-keeps its static address on all others, so stealth on Base and static on Ethereum is one list entry.
-The ENSIP-19 default coin type (`0x80000000`) can be listed too, as an opt-in: a query for the
-default then goes to the gateway, so the recipient must detect payments on any EVM chain, and a
-chain that is not listed still never falls back to it. This departs from the ENSIP draft, which
-allows only ENSIP-11 coin types, and is raised against it. `0x80000001`, Ethereum in ENSIP-11 form,
-cannot be listed (chain 1 is 60); a query for it is forwarded like any unlisted coin type. A records
-resolver that holds an ENSIP-19 default address answers every EVM coin type without its own record:
-`0x80000001`, unlisted chains, and the default itself unless it is listed. Keep no default record on
-a name with listed chains.
-The record is served for every listed chain whether or not gateway URLs are set, so a name that
-allows only client-side derivation (the ENSIP's flag bit 0) lists its chains with no gateway URLs;
-one name cannot use the gateway on some chains and client-side derivation only on others.
-Removing a chain falls back to the static address, never to unverified resolution: a lookup in
-flight when the chain or the gateway is removed is rejected (`ChainNotStealth`). A lookup is also
-bound to the authority and gateway URLs it was sent to, as ENS's UniversalResolver sends each
-callback to the resolver it looked up. If they change before the callback, the answer is rejected:
-`StaleLookup` for new URLs, `ChainNotStealth` when `clearRecords`, a lapse or a re-registration
-left the coin type unlisted under the authority found at callback time (`StaleLookup` if it is
-listed there). The record, and with it the mode, is still read in the callback, as the ENSIP
-requires. For Fluidkey,
-the list of `fkey.eth` covers every username: adding a chain is one transaction.
+**Chain lists.** One meta-address serves every listed chain (the ENSIP's rationale allows storing
+the key material once and exposing it under each coin type enabled for the name). Only EVM coin
+types can be listed, since the verifier answers with an EVM address. A name is stealth on listed
+chains and keeps its static address on all others, so stealth on Base and static on Ethereum is one
+list entry. The ENSIP-19 default coin type (`0x80000000`) can be listed too, as an opt-in: a query
+for the default then goes to the gateway, so the recipient must detect payments on any EVM chain,
+and a chain that is not listed still never falls back to it. This departs from the ENSIP draft,
+which allows only ENSIP-11 coin types, and is raised against it. `0x80000001`, Ethereum in ENSIP-11
+form, cannot be listed (chain 1 is 60); a query for it is forwarded like any unlisted coin type. A
+records resolver that holds an ENSIP-19 default address answers every EVM coin type without its own
+record: `0x80000001`, unlisted chains, and the default itself unless it is listed. Keep no default
+record on a name with listed chains. The record is served for every listed chain whether or not
+gateway URLs are set, so a name that allows only client-side derivation (the ENSIP's flag bit 0)
+lists its chains with no gateway URLs; one name cannot use the gateway on some chains and
+client-side derivation only on others. Removing a chain falls back to the static address, never to
+unverified resolution: a lookup in flight when the chain or the gateway is removed is rejected
+(`ChainNotStealth`). A lookup is also bound to the authority and gateway URLs it was sent to, as
+ENS's UniversalResolver sends each callback to the resolver it looked up. If they change before the
+callback, the answer is rejected: `StaleLookup` for new URLs, `ChainNotStealth` when `clearRecords`,
+a lapse or a re-registration left the coin type unlisted under the authority found at callback time
+(`StaleLookup` if it is listed there). The record, and with it the mode, is still read in the
+callback, as the ENSIP requires. For Fluidkey, the list of `fkey.eth` covers every username: adding
+a chain is one transaction.
 
 Records are checked when written: empty (cleared), or a flag byte with reserved bits zero followed by
 a non-empty meta-address. The scheme's verifier checks the meta-address itself when verifying, and a
@@ -85,11 +84,11 @@ malformed one fails the resolution.
 
 Only `addr`, `addr(coinType)` and the two multicall forms (`multicall`, `multicallWithNodeCheck`,
 both split into single queries) take the gateway path. Other selectors, such as `hasAddr` and
-`interfaceImplementer`, are forwarded, so a static address left in the records resolver for a listed chain is readable through
-them (it is public onchain anyway). Do not keep one there; static addresses for unlisted chains are
-intended. A nested `resolve(name, resolve(...))` is refused (`UnsupportedResolverProfile`), as ENS's
-`PermissionedResolver` refuses it, so it cannot reach that address through a records resolver that
-executes inner calldata.
+`interfaceImplementer`, are forwarded, so a static address left in the records resolver for a listed
+chain is readable through them (it is public onchain anyway). Do not keep one there; static
+addresses for unlisted chains are intended. A nested `resolve(name, resolve(...))` is refused
+(`UnsupportedResolverProfile`), as ENS's `PermissionedResolver` refuses it, so it cannot reach that
+address through a records resolver that executes inner calldata.
 
 **Batched lookups.** A single address lookup goes from the client straight to the stealth gateway.
 In `resolve(name, multicall(...))` the lookups are batched through the gateways of ENS's batch
@@ -152,12 +151,12 @@ records are therefore never read, and the new holder starts empty. A transfer ke
 and the state with it, as ENS's resolvers keep a name's records: the buyer drops what the seller
 left with one `clearRecords(name)`, as with `clearRecords(node)` on ENS's `PublicResolver`. A
 reserved name's registration starts empty, also after the reservation lapsed (ENSv2 keeps that
-resource; the state key includes the reserved status). A label reserved again after its
-reservation lapsed keeps both, so it reads what the previous reservation left: `clearRecords` it.
-An expired name that is not registered again resolves
-as a wildcard name of its parent, and a record the parent wrote for it before it was registered is
-served again, as ENS falls back to the parent's resolver. A parent therefore clears a username's
-wildcard record before registering the username; it cannot while the username is registered.
+resource; the state key includes the reserved status). A label reserved again after its reservation
+lapsed keeps both, so it reads what the previous reservation left: `clearRecords` it. An expired
+name that is not registered again resolves as a wildcard name of its parent, and a record the parent
+wrote for it before it was registered is served again, as ENS falls back to the parent's resolver. A
+parent therefore clears a username's wildcard record before registering the username; it cannot
+while the username is registered.
 
 **Section 5 by name.** `gatewayURLs(node)` and `verifyStealthResolution(node, ...)` are answered
 only through ENSIP-10 `resolve(name, data)`, which the UniversalResolver wraps every profile call
@@ -185,8 +184,8 @@ over a name is reachable only by name.
 
 A smart account can batch all five. For a name acquired by transfer, revoke any other
 `ROLE_SET_RESOLVER` holder on its token (the registry keeps the seller's grants), then call
-`clearRecords(name)`. For a wildcard username, the parent's holder calls `setMetaAddress` for the username's name;
-the parent's records resolver can be an offchain one.
+`clearRecords(name)`. For a wildcard username, the parent's holder calls `setMetaAddress` for the
+username's name; the parent's records resolver can be an offchain one.
 
 ### Scheme 1
 
@@ -254,12 +253,12 @@ below, which all have the Safe contracts; a name that lists another chain fails 
 | ENSIP-19 default (any EVM chain) | `0x80000000` |
 
 The gateway signs for the default too, for authorities that list it (see "Chain lists"), so that
-wallets asking only for the default get a stealth Safe. Its answer names no chain, so a payer can use it on any EVM
-chain, including one where the Safe is not the recipient's: out of reach on zkSync-family chains,
-and on a chain without the Safe contracts deployable without its setup by anyone who saw the
-lookup. Fluidkey derives the same Safe for every chain, so on the seven chains above the payment
-is found. An authority lists the default only if it accepts that risk for payers whose wallets ask
-for it.
+wallets asking only for the default get a stealth Safe. Its answer names no chain, so a payer can
+use it on any EVM chain, including one where the Safe is not the recipient's: out of reach on
+zkSync-family chains, and on a chain without the Safe contracts deployable without its setup by
+anyone who saw the lookup. Fluidkey derives the same Safe for every chain, so on the seven chains
+above the payment is found. An authority lists the default only if it accepts that risk for payers
+whose wallets ask for it.
 
 The Safe's setup `to` and `data` follow the account's auto-earn setting and affect who can move
 funds, so they are fixed by the scheme and selected by the record, never by the gateway (ENSIP-30
@@ -301,12 +300,12 @@ Both modes require a signature by an account that `FluidkeySigners` lists (EIP-7
   then, also after the name changes hands. The gateway signs well inside the limit, such as 5
   minutes, to allow for clock skew and lagging RPCs.
 
-`FluidkeySigners` is owned by Fluidkey so signing keys rotate without redeploying. Its ownership
-can be transferred (in two steps) but not renounced, which would freeze the signer set, leaked keys
+`FluidkeySigners` is owned by Fluidkey so signing keys rotate without redeploying. Its ownership can
+be transferred (in two steps) but not renounced, which would freeze the signer set, leaked keys
 included. Every FK1 lookup, verified ones included, needs a current signer's signature, so
-Fluidkey's signing service is on the availability path of every FK1 name. In verified mode a signer can refuse a derivation but cannot make the verifier return a
-Safe the record does not derive. The scheme ID, FK1 (`0x464B31`, 4606769), is a constructor
-argument: the scheme's ERC declares it.
+Fluidkey's signing service is on the availability path of every FK1 name. In verified mode a signer
+can refuse a derivation but cannot make the verifier return a Safe the record does not derive. The
+scheme ID, FK1 (`0x464B31`, 4606769), is a constructor argument: the scheme's ERC declares it.
 
 Fluidkey's gateway answers with the Safe address and, if the name has a record (read onchain as the
 callback reads it), `e || S.x || S.y` and the signature; otherwise the signed expiry. Records
