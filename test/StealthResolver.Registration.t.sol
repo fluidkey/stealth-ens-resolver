@@ -140,7 +140,7 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
         assertFalse(resolver.canSetMetaAddress(dns("vip.club.eth"), clubOwner), "not the parent");
         assertTrue(resolver.canSetConfig(dns("vip.club.eth"), registrar), "who sets its resolver");
         assertTrue(resolver.canSetMetaAddress(dns("sub.vip.club.eth"), registrar), "and below");
-        assertFalse(resolver.isStealthChain(dns("vip.club.eth"), COIN_ETH), "no parent gateway");
+        assertFalse(isStealthChain("vip.club.eth", COIN_ETH), "no parent gateway");
 
         setChain(registrar, "vip.club.eth", COIN_ETH, true);
         setMeta(registrar, "vip.club.eth", META);
@@ -193,7 +193,7 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
         emit StealthResolver.VersionChanged(node("shop.fkey.eth"), 1);
         vm.prank(buyer);
         resolver.clearRecords(dns("shop.fkey.eth"));
-        assertFalse(resolver.isStealthChain(dns("shop.fkey.eth"), COIN_ETH), "chain list cleared");
+        assertFalse(isStealthChain("shop.fkey.eth", COIN_ETH), "chain list cleared");
         bytes memory call = abi.encodeCall(IStealthResolver.gatewayURLs, (node("shop.fkey.eth")));
         assertEq(
             abi.decode(resolver.resolve(dns("shop.fkey.eth"), call), (string[])).length,

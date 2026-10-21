@@ -114,7 +114,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         );
         assertEq(coinType, 0x80000000);
         uint256 polygon = 0x80000089;
-        assertFalse(resolver.isStealthChain(dns("bob.fkey.eth"), polygon), "no fallback");
+        assertFalse(isStealthChain("bob.fkey.eth", polygon), "no fallback");
         vm.prank(fluidkey);
         fkeyRecords.setAddress(dns("bob.fkey.eth"), polygon, abi.encodePacked(address(0xBEEF)));
         bytes memory v = resolver.resolve(
@@ -140,7 +140,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
                 )
             )
         );
-        assertTrue(resolver.isStealthChain(dns("alice.fkey.eth"), 0x80000001));
+        assertTrue(isStealthChain("alice.fkey.eth", 0x80000001));
         assertEq(_data(aliceNode, 0x80000001), META, "the record of 60");
     }
 
@@ -288,7 +288,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         ethRegistry.grantRootRoles(RegistryRolesLib.ROLE_RENEW, address(this));
         ethRegistry.renew(uint256(keccak256("fkey")), expiry + 1000 days);
         vm.warp(expiry);
-        assertTrue(resolver.isStealthChain(dns("alice.fkey.eth"), COIN_ETH), "parent's gateway");
+        assertTrue(isStealthChain("alice.fkey.eth", COIN_ETH), "parent's gateway");
         (bool ok, bytes memory v) = callback(p, abi.encode(makeAddr("attacker"), VD));
         assertFalse(ok);
         assertEq(v, abi.encodeWithSelector(StealthResolver.StaleLookup.selector));

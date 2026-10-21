@@ -10,6 +10,6 @@
   "resolve_verifyStealthResolution_mockVerifier": "43773",
   "resolve_wildcardAddr_offchainLookup": "44877",
   "setChains_oneChain": "91449",
-  "setConfig_recordsResolver_oneUrl": "143412",
-  "setMetaAddress_67bytes": "158942"
+  "setConfig_recordsResolver_oneUrl": "143390",
+  "setMetaAddress_67bytes": "158920"
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.25;
 
+import {OffchainLookup} from "@ens/contracts/ccipRead/EIP3668.sol";
+import {IAddressResolver} from "@ens/contracts/resolvers/profiles/IAddressResolver.sol";
 import {BytesUtils} from "@ens/contracts/utils/BytesUtils.sol";
 import {NameCoder} from "@ens/contracts/utils/NameCoder.sol";
 import {
@@ -173,6 +175,23 @@ abstract contract StealthResolverFixture is V1Fixture, V2Fixture, CCIPClient {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), STEALTH_GW);
         setChain(alice, "alice.fkey.eth", coinType, true);
         setMeta(alice, "alice.fkey.eth", META);
+    }
+
+    /// @dev Whether an address query for `name` on `coinType` goes to the stealth gateway, probed
+    ///      as ENSIP-30 Section 2 has clients probe it: the query reverts `OffchainLookup` with
+    ///      this resolver's stealth callback.
+    function isStealthChain(string memory name, uint256 coinType) internal view returns (bool) {
+        (bool ok, bytes memory v) = address(resolver).staticcall(
+            abi.encodeCall(
+                resolver.resolve,
+                (dns(name), abi.encodeCall(IAddressResolver.addr, (node(name), coinType)))
+            )
+        );
+        if (ok || bytes4(v) != OffchainLookup.selector) return false;
+        (,,, bytes4 callback,) = abi.decode(
+            BytesUtils.substring(v, 4, v.length - 4), (address, string[], bytes, bytes4, bytes)
+        );
+        return callback == resolver.resolveStealthCallback.selector;
     }
 
     function metaWithoutFlag() internal pure returns (bytes memory) {

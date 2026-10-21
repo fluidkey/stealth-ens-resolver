@@ -320,15 +320,6 @@ contract StealthResolver is
         return _isAuthority(_context(name), account);
     }
 
-    /// @notice Whether an address query for `name` on `coinType` goes to the gateway: the coin
-    ///         type is on the chain list of its authority (the name itself if registered,
-    ///         otherwise its nearest registered ancestor) and the authority has gateway URLs.
-    /// @dev ENSIP-30 Section 2: the per-coin-type form of "gateway-based resolution is configured
-    ///      for the name". Whether it is verified is told by the Section 1 record.
-    function isStealthChain(bytes calldata name, uint256 coinType) external view returns (bool) {
-        return _isStealth(_context(name).key, _chainCoinType(coinType));
-    }
-
     ////////////////////////////////////////////////////////////////////////
     // IStealthResolver (ENSIP-30 Section 5)
     ////////////////////////////////////////////////////////////////////////

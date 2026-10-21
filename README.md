@@ -48,7 +48,6 @@ registered ancestor. Nothing is inherited past a registered name.
 | `schemeId()` | This resolver's scheme, for any name, as the ENSIP requires of `IStealthResolver`'s functions through `resolve()`; also answered directly. |
 | `verifyStealthResolution(node, coinType, address, verificationData)` | Verified against N's record, located by name like every other query, wildcard names included. Through `resolve()` only, as above; no CCIP-Read is involved, so contracts can call it onchain. Answered only while `StealthResolver` is the name's resolver in the registry (`NotNamesResolver` otherwise), so a record the name abandoned by moving to another resolver no longer verifies. |
 | `getResolver(name)` (`ICompositeResolver`) | The records resolver, so apps know where to edit other records. |
-| `isStealthChain(name, coinType)` (view, not through `resolve()`) | Whether an address query for that coin type goes to the gateway: on the authority's chain list and gateway URLs set. Verified or not is told by the record. |
 
 **The record served is the record verified**, for every name, wildcard names included. Only the
 scheme's key in canonical form is the record; other spellings (`[060]`, `[0x3c]`) are ordinary data,
@@ -309,7 +308,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 22,434 | 2,142 |
+| `StealthResolver` | 22,128 | 2,448 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
 | `FluidkeyVerifier` | 5,815 | 18,761 |
 | `FluidkeySigners` | 894 | 23,682 |
@@ -332,9 +331,9 @@ read cost.
 | `FluidkeyVerifier.verify`, unverified mode, signed | 14,923 |
 | `resolve` text, forwarded to a `PermissionedResolver` | 43,907 |
 | `resolve` text on the `PermissionedResolver` directly (reference) | 6,426 |
-| `setConfig`, records resolver and one URL (transaction) | 143,412 |
+| `setConfig`, records resolver and one URL (transaction) | 143,390 |
 | `setChains`, one chain (transaction) | 91,449 |
-| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 158,942 |
+| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 158,920 |
 
 ## Build and test
 
