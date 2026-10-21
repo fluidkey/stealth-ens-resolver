@@ -232,9 +232,10 @@ Both modes require a signature by an account that `FluidkeySigners` lists (EIP-7
 - Unverified mode (no record): `verificationData` is `abi.encode(uint64 expires, bytes signature)`,
   over `StealthResolution(address resolver, bytes32 node, uint256 coinType, address stealthAddress,
   uint64 expires)`. That stops a batch gateway from substituting the address; it authenticates
-  Fluidkey and is not verification under the ENSIP. The verifier does not cap `expires`: a relay
-  that kept a response can serve it until then, also after the name changes hands, so the gateway
-  should sign short expiries.
+  Fluidkey and is not verification under the ENSIP. `expires` may be at most 10 minutes
+  (`MAX_VALIDITY`) after the block's timestamp: a relay that kept a response can serve it until
+  then, also after the name changes hands. The gateway signs well inside the limit, such as 5
+  minutes, to allow for clock skew and lagging RPCs.
 
 `FluidkeySigners` is owned by Fluidkey so signing keys rotate without redeploying. In verified mode
 a signer can refuse a derivation but cannot make the verifier return a Safe the record does not
@@ -267,7 +268,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 |---|---|---|
 | `StealthResolver` | 20,825 | 3,751 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
-| `FluidkeyVerifier` | 5,939 | 18,637 |
+| `FluidkeyVerifier` | 6,071 | 18,505 |
 | `FluidkeySigners` | 894 | 23,682 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
@@ -284,8 +285,8 @@ read cost.
 | `resolveStealthCallback`, verified (registered name) | 29,191 + verifier |
 | `resolve` registered name, `verifyStealthResolution` | 26,918 + verifier |
 | `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,122 |
-| `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,731 |
-| `FluidkeyVerifier.verify`, unverified mode, signed | 14,912 |
+| `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,709 |
+| `FluidkeyVerifier.verify`, unverified mode, signed | 14,993 |
 | `resolve` text, forwarded to a `PermissionedResolver` | 43,378 |
 | `resolve` text on the `PermissionedResolver` directly (reference) | 6,425 |
 | `setConfig`, records resolver and one URL (transaction) | 140,996 |

@@ -409,6 +409,20 @@ contract FluidkeyVerifierTest is Test {
         verifier.verify(node, 60, "", vd, claimed);
     }
 
+    /// @dev `expires` at most `MAX_VALIDITY` ahead, so a kept response is served again for that
+    ///      long at most.
+    function test_unverified_expiryCap() public {
+        address claimed = makeAddr("safe");
+        uint64 limit = uint64(block.timestamp + verifier.MAX_VALIDITY());
+        assertEq(verifier.MAX_VALIDITY(), 10 minutes);
+        assertEq(
+            _unverified(resolver, node, 60, _signed(SIGNER_KEY, claimed, limit), claimed), bytes4(0)
+        );
+        vm.prank(resolver);
+        vm.expectRevert(abi.encodeWithSelector(FluidkeyVerifier.ExpiryTooFar.selector, limit + 1));
+        verifier.verify(node, 60, "", _signed(SIGNER_KEY, claimed, limit + 1), claimed);
+    }
+
     function test_unverified_notASigner() public {
         address claimed = makeAddr("safe");
         uint64 expires = uint64(block.timestamp + 300);

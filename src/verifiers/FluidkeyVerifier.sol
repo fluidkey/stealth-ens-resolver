@@ -34,8 +34,9 @@ import {LibEcrecover} from "./LibEcrecover.sol";
 ///      its own `e` is refused. It does not expire, since the record fixes the Safe for each `e`.
 ///      Unverified mode (no record): `verificationData` = abi.encode(uint64 expires, bytes
 ///      signature), an EIP-712 signature by a Fluidkey gateway signer over the resolver, node,
-///      coin type, returned address and expiry. This authenticates the gateway (and defeats a
-///      batch gateway substituting the address); it is not verification under ENSIP-30.
+///      coin type, returned address and expiry, at most `MAX_VALIDITY` ahead. This authenticates
+///      the gateway (and defeats a batch gateway substituting the address); it is not
+///      verification under ENSIP-30.
 ///      No owner. The signer set (`SIGNERS`) is Fluidkey's: in verified mode a signer can refuse
 ///      a derivation but cannot make the verifier return a Safe the record does not derive.
 contract FluidkeyVerifier is IStealthVerifier, EIP712 {
@@ -64,6 +65,11 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
     bytes32 internal constant STEALTH_RESOLUTION_TYPEHASH = keccak256(
         "StealthResolution(address resolver,bytes32 node,uint256 coinType,address stealthAddress,uint64 expires)"
     );
+
+    /// @notice The longest a signed unverified response stays valid: its `expires` may be at most
+    ///         this far after the block's timestamp, which bounds how long a kept response can be
+    ///         served again.
+    uint256 public constant MAX_VALIDITY = 10 minutes;
 
     ////////////////////////////////////////////////////////////////////////
     // Immutables
@@ -100,6 +106,9 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
 
     /// @notice The signed response expired at `expires`.
     error SignatureExpired(uint64 expires);
+
+    /// @notice The signed response's `expires` is more than `MAX_VALIDITY` ahead.
+    error ExpiryTooFar(uint64 expires);
 
     /// @notice `signer` is not a Fluidkey gateway signer.
     error UnknownSigner(address signer);
@@ -251,7 +260,8 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
     }
 
     /// @dev Unverified mode: `claimed` if a current Fluidkey gateway signer signed it for this
-    ///      resolver (`msg.sender`), node and coin type before `expires`.
+    ///      resolver (`msg.sender`), node and coin type, valid until `expires`, which is at most
+    ///      `MAX_VALIDITY` ahead.
     function _verifySigned(
         bytes32 node,
         uint256 coinType,
@@ -260,6 +270,7 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
     ) internal view returns (address) {
         (uint64 expires, bytes memory signature) = abi.decode(verificationData, (uint64, bytes));
         if (block.timestamp > expires) revert SignatureExpired(expires);
+        if (expires > block.timestamp + MAX_VALIDITY) revert ExpiryTooFar(expires);
         _checkSigner(
             keccak256(
                 abi.encode(
