@@ -341,6 +341,23 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         assertEq(abi.decode(v, (address)), aliceStatic);
     }
 
+    /// @dev A name lists its chains without gateway URLs to allow client-side derivation only: the
+    ///      record is served for every listed chain, and its address queries are forwarded.
+    function test_clientSideOnly_recordServedWithoutGateway() public {
+        address aliceStatic = makeAddr("aliceStatic");
+        vm.prank(alice);
+        aliceRecords.setAddress(dns("alice.fkey.eth"), COIN_ETH, abi.encodePacked(aliceStatic));
+        setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
+        setChain(alice, "alice.fkey.eth", COIN_ETH, true);
+        setMeta(alice, "alice.fkey.eth", META);
+        assertEq(uint8(META[0]) & 1, 1, "client-side derivation permitted");
+        assertEq(_data(aliceNode, COIN_ETH), META);
+        assertFalse(isStealthChain("alice.fkey.eth", COIN_ETH));
+        bytes memory v =
+            resolver.resolve(dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode)));
+        assertEq(abi.decode(v, (address)), aliceStatic);
+    }
+
     function test_unverified_wildcardReturnsGatewayAddress() public {
         address chosen = makeAddr("chosen");
         (bool ok, bytes memory v) =

@@ -66,6 +66,9 @@ cannot be listed (chain 1 is 60); a query for it is forwarded like any unlisted 
 resolver that holds an ENSIP-19 default address answers every EVM coin type without its own record:
 `0x80000001`, unlisted chains, and the default itself unless it is listed. Keep no default record on
 a name with listed chains.
+The record is served for every listed chain whether or not gateway URLs are set, so a name that
+allows only client-side derivation (the ENSIP's flag bit 0) lists its chains with no gateway URLs;
+one name cannot use the gateway on some chains and client-side derivation only on others.
 Removing a chain falls back to the static address, never to unverified resolution: a lookup in
 flight when the chain or the gateway is removed is rejected (`ChainNotStealth`). A lookup is also
 bound to the authority and gateway URLs it was sent to, as ENS's UniversalResolver sends each
