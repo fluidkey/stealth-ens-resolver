@@ -151,11 +151,8 @@ only through ENSIP-10 `resolve(name, data)`, directly or through the UniversalRe
 every profile call that way. A node alone cannot be walked through the registry to the name's
 authority, so a direct call reverts `ResolveOnly`; the interface is still reported through ERC-165.
 Out-of-flow verifiers and contracts consuming stealth resolutions call
-`resolve(name, verifyStealthResolution(...))`. This departs from the ENSIP draft, whose Section 2
-has clients call `gatewayURLs(node)` and whose Section 5 implies both functions answer a direct
-call; it is raised against the ENSIP. The alternative, remembering per node which authority wrote
-last, costs a storage write per `setConfig` and `setMetaAddress` and answers for a previous holder
-after a re-registration until the new holder writes.
+`resolve(name, verifyStealthResolution(...))`. The ENSIP allows this for deployments such as ENSv2,
+where the authority over a name is reachable only by name.
 
 ### Setting up a name for verified resolution
 
@@ -190,9 +187,9 @@ only the result's address. That covers the last step. Hashing `S` needs its coor
 gateway sends `S` and the verifier checks that its address is that of `e·P_view`; a different `S`
 with the same address is a 160-bit second preimage of keccak256. Two `ecrecover` calls, no curve
 library: `LibEcrecover` holds the construction, the one Chainlink's VRF verifier uses in production,
-and its tests check it against Chainlink's code and against direct key derivation. Scheme 1's `verificationData` is therefore 96 bytes, `e || S.x || S.y`, where the ENSIP
-draft's Section 4 has the 32-byte `e` alone; this is raised against the ENSIP, and a gateway
-computes `S` anyway.
+and its tests check it against Chainlink's code and against direct key derivation. Scheme 1's
+`verificationData` is therefore 96 bytes, `e || S.x || S.y` (the ENSIP leaves the format to each
+scheme); a gateway computes `S` anyway.
 
 The meta-address must be two compressed keys whose x-coordinates are below the group order `n`;
 anything else, including the one in about 2^128 valid keys at or above `n` that `ecrecover` cannot

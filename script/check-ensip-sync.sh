@@ -10,7 +10,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENSIP_REF="${ENSIP_REF:-1fb8d1c91c1c1e2fc91372fe525ecca09138e288}"
+ENSIP_REF="${ENSIP_REF:-955e104670b5f019cd3b8a5f4a208142818d68bc}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
