@@ -216,9 +216,9 @@ The Safe uses the default Safe 1.3.0 deployments (factory, L1 singleton, compati
 handler, MultiSend, SafeModuleSetup), so a stealth Safe has the same address on every chain. It is
 the recipient's only where those contracts are deployed: elsewhere the address can be out of reach,
 or deployable without its setup by whoever knows `owner`. The verifier therefore answers only for
-the chains below, which all have them, and reverts `UnsupportedChain` for any other coin type in
-both modes, the ENSIP-19 default (`0x80000000`) included. The list is immutable: a name that lists
-another chain fails lookups on it.
+the chains below, which all have them, and for the ENSIP-19 default, and reverts `UnsupportedChain`
+for any other coin type in both modes. The list is immutable: a name that lists another chain fails
+lookups on it.
 
 | Chain | Coin type |
 |---|---|
@@ -229,6 +229,15 @@ another chain fails lookups on it.
 | Polygon PoS | `0x80000089` |
 | Gnosis | `0x80000064` |
 | BNB Smart Chain | `0x80000038` |
+| ENSIP-19 default (any EVM chain) | `0x80000000` |
+
+The default is answered for authorities that list it (see "Chain lists"), so that wallets asking
+only for the default get a stealth Safe. Its answer names no chain, so a payer can use it on any EVM
+chain, including one where the Safe is not the recipient's: out of reach on zkSync-family chains,
+and on a chain without the Safe contracts deployable without its setup by anyone who saw the
+lookup. Fluidkey derives the same Safe for every chain, so on the seven chains above the payment
+is found. An authority lists the default only if it accepts that risk for payers whose wallets ask
+for it.
 
 The Safe's setup `to` and `data` follow the account's auto-earn setting and affect who can move
 funds, so they are fixed by the scheme and selected by the record, never by the gateway (ENSIP-30
@@ -299,7 +308,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 |---|---|---|
 | `StealthResolver` | 21,950 | 2,626 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
-| `FluidkeyVerifier` | 5,801 | 18,775 |
+| `FluidkeyVerifier` | 5,815 | 18,761 |
 | `FluidkeySigners` | 894 | 23,682 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
@@ -316,8 +325,8 @@ read cost.
 | `resolveStealthCallback`, verified (registered name) | 30,685 + verifier |
 | `resolve` registered name, `verifyStealthResolution` | 27,323 + verifier |
 | `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,122 |
-| `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,622 |
-| `FluidkeyVerifier.verify`, unverified mode, signed | 14,906 |
+| `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,639 |
+| `FluidkeyVerifier.verify`, unverified mode, signed | 14,923 |
 | `resolve` text, forwarded to a `PermissionedResolver` | 43,801 |
 | `resolve` text on the `PermissionedResolver` directly (reference) | 6,426 |
 | `setConfig`, records resolver and one URL (transaction) | 143,394 |

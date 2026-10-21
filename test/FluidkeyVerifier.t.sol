@@ -24,9 +24,18 @@ contract FluidkeyVerifierTest is Test {
     address internal resolver = makeAddr("resolver");
     bytes32 internal node = keccak256("bob.fkey.eth");
 
-    /// @dev Ethereum, Base, OP Mainnet, Arbitrum One, Polygon PoS, Gnosis, BNB Smart Chain.
-    uint256[7] internal chains =
-        [uint256(60), 0x80002105, 0x8000000a, 0x8000a4b1, 0x80000089, 0x80000064, 0x80000038];
+    /// @dev Ethereum, Base, OP Mainnet, Arbitrum One, Polygon PoS, Gnosis, BNB Smart Chain and the
+    ///      ENSIP-19 default.
+    uint256[8] internal chains = [
+        uint256(60),
+        0x80002105,
+        0x8000000a,
+        0x8000a4b1,
+        0x80000089,
+        0x80000064,
+        0x80000038,
+        0x80000000
+    ];
 
     function setUp() public {
         signers = new FluidkeySigners(address(this));
@@ -176,7 +185,6 @@ contract FluidkeyVerifierTest is Test {
         for (uint256 i; i < chains.length; ++i) {
             assertTrue(verifier.isSupportedChain(chains[i]), vm.toString(chains[i]));
         }
-        assertFalse(verifier.isSupportedChain(0x80000000), "default EVM coin type");
         assertFalse(verifier.isSupportedChain(0x80000001), "chain 1 under ENSIP-19 encoding");
         assertFalse(verifier.isSupportedChain(0), "Bitcoin");
         assertFalse(verifier.isSupportedChain(0x80aa36a7), "Sepolia");

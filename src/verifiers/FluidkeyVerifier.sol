@@ -23,7 +23,8 @@ import {LibEcrecover} from "./LibEcrecover.sol";
 ///      `configHash` in the record (ENSIP-30 Section 5), never by the gateway. Any `configHash` is
 ///      accepted: the record's writer chooses it. A new Earn module or Safe version is a new scheme
 ///      (FK2).
-///      Both modes answer only for the chains `isSupportedChain` lists.
+///      Both modes answer only for the coin types `isSupportedChain` lists: seven chains, and the
+///      ENSIP-19 default for authorities that list it.
 ///
 ///      Meta-address (65 bytes) = compressed P_spend || configHash (uint256, 0 = auto-earn off).
 ///      Verified mode: `verificationData` = e || S.x || S.y || signature (161 bytes). The
@@ -161,9 +162,11 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
     }
 
     /// @notice Whether FK1 answers for `coinType` (ENSIP-11, ENSIP-19): Ethereum, Base, OP
-    ///         Mainnet, Arbitrum One, Polygon PoS, Gnosis and BNB Smart Chain. All have the Safe
-    ///         contracts above; BNB Smart Chain does not have the Earn module yet, whose address
-    ///         only Fluidkey can deploy (README, "Fluidkey stealth Safe (FK1)").
+    ///         Mainnet, Arbitrum One, Polygon PoS, Gnosis and BNB Smart Chain, and the ENSIP-19
+    ///         default. All seven chains have the Safe contracts above; BNB Smart Chain does not
+    ///         have the Earn module yet, whose address only Fluidkey can deploy. An answer for the
+    ///         default names no chain, so it can be paid on a chain where the Safe is not the
+    ///         recipient's (README, "Fluidkey stealth Safe (FK1)").
     function isSupportedChain(uint256 coinType) public pure returns (bool) {
         return coinType == 60 // Ethereum
             || coinType == 0x80002105 // Base (8453)
@@ -171,7 +174,8 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
             || coinType == 0x8000a4b1 // Arbitrum One (42161)
             || coinType == 0x80000089 // Polygon PoS (137)
             || coinType == 0x80000064 // Gnosis (100)
-            || coinType == 0x80000038; // BNB Smart Chain (56)
+            || coinType == 0x80000038 // BNB Smart Chain (56)
+            || coinType == 0x80000000; // ENSIP-19 default: any EVM chain
     }
 
     /// @notice The CREATE2 address of the 1-of-1 Safe owned by `owner` with the setup for

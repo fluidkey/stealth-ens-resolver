@@ -148,6 +148,39 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
         assertEq(item, abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector, address(0)));
     }
 
+    /// @dev A name that lists the ENSIP-19 default answers it verified: the signature binds the
+    ///      default coin type.
+    function test_defaultCoinType_verified() public {
+        setChain(alice, "alice.fkey.eth", 0x80000000, true);
+        bytes32 structHash = keccak256(
+            abi.encode(
+                keccak256(
+                    "VerifiedStealthResolution(address resolver,bytes32 node,uint256 coinType,address stealthAddress)"
+                ),
+                address(resolver),
+                aliceNode,
+                uint256(0x80000000),
+                v.stealthAddress
+            )
+        );
+        gwClaimed = v.stealthAddress;
+        gwVerificationData = bytes.concat(v.verificationData, _sig(structHash));
+        (bool ok, bytes memory result) = ccipCall(
+            address(resolver),
+            abi.encodeCall(
+                resolver.resolve,
+                (
+                    dns("alice.fkey.eth"),
+                    abi.encodeCall(IAddressResolver.addr, (aliceNode, 0x80000000))
+                )
+            )
+        );
+        assertTrue(ok);
+        assertEq(
+            abi.decode(abi.decode(result, (bytes)), (bytes)), abi.encodePacked(v.stealthAddress)
+        );
+    }
+
     /// @dev A chain FK1 does not support fails the lookup even when the name lists it.
     function test_unsupportedChainRejected() public {
         uint256 zkSyncEra = 0x80000000 | 324;
