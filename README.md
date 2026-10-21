@@ -82,7 +82,9 @@ Only `addr`, `addr(coinType)` and the two multicall forms (`multicall`, `multica
 both split into single queries) take the gateway path. Other selectors, such as `hasAddr`, are
 forwarded, so a static address left in the records resolver for a listed chain is readable through
 them (it is public onchain anyway). Do not keep one there; static addresses for unlisted chains are
-intended.
+intended. A nested `resolve(name, resolve(...))` is refused (`UnsupportedResolverProfile`), as ENS's
+`PermissionedResolver` refuses it, so it cannot reach that address through a records resolver that
+executes inner calldata.
 
 **Batched lookups.** A single address lookup goes from the client to the stealth gateway. In
 `resolve(name, multicall(...))` every lookup is batched through ENS's batch gateway, as the
@@ -306,7 +308,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 21,950 | 2,626 |
+| `StealthResolver` | 22,011 | 2,565 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
 | `FluidkeyVerifier` | 5,815 | 18,761 |
 | `FluidkeySigners` | 894 | 23,682 |
@@ -319,15 +321,15 @@ read cost.
 
 | Path | Gas |
 |---|---|
-| `resolve` wildcard name, address, `OffchainLookup` revert | 44,771 |
-| `resolve` registered name, address, `OffchainLookup` revert | 25,170 |
+| `resolve` wildcard name, address, `OffchainLookup` revert | 44,815 |
+| `resolve` registered name, address, `OffchainLookup` revert | 25,214 |
 | `resolveStealthCallback`, unverified (wildcard name) | 49,260 + verifier |
 | `resolveStealthCallback`, verified (registered name) | 30,685 + verifier |
-| `resolve` registered name, `verifyStealthResolution` | 27,323 + verifier |
+| `resolve` registered name, `verifyStealthResolution` | 27,367 + verifier |
 | `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,122 |
 | `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,639 |
 | `FluidkeyVerifier.verify`, unverified mode, signed | 14,923 |
-| `resolve` text, forwarded to a `PermissionedResolver` | 43,801 |
+| `resolve` text, forwarded to a `PermissionedResolver` | 43,845 |
 | `resolve` text on the `PermissionedResolver` directly (reference) | 6,426 |
 | `setConfig`, records resolver and one URL (transaction) | 143,394 |
 | `setChains`, one chain (transaction) | 91,431 |

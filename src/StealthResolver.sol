@@ -464,6 +464,11 @@ contract StealthResolver is
         returns (bytes memory)
     {
         bytes4 selector = bytes4(data);
+        // A nested resolve() would reach a records resolver that executes inner calldata, and
+        // with it a static address on a listed chain; ENS's PermissionedResolver refuses it too.
+        if (selector == IExtendedResolver.resolve.selector) {
+            revert IUniversalResolver.UnsupportedResolverProfile(selector);
+        }
         NameState memory ctx = _context(name);
         Config storage c = _configs[ctx.key];
         if (selector == IStealthResolver.gatewayURLs.selector) {

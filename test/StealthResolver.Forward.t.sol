@@ -166,6 +166,21 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         );
     }
 
+    /// @dev A nested `resolve(name, resolve(name, addr(...)))` is refused, alone and as a multicall
+    ///      item, so it cannot reach a static address through a records resolver that executes
+    ///      inner calldata.
+    function test_nestedResolveRefused() public {
+        bytes memory nested = abi.encodeCall(
+            resolver.resolve, (dns("bob.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (bobNode)))
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IUniversalResolver.UnsupportedResolverProfile.selector, resolver.resolve.selector
+            )
+        );
+        resolver.resolve(dns("bob.fkey.eth"), nested);
+    }
+
     /// @dev The node-checked form checks every item, forwarded ones included, as ENS's
     ///      `Multicallable` does: an item for another name fails the whole call.
     function test_multicallWithNodeCheck_checksEveryItem() public {
