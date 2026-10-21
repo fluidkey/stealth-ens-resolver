@@ -248,7 +248,7 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
     }
 
     /// @dev Unverified mode: `claimed` if a current Fluidkey gateway signer signed it for this
-    ///      resolver (`msg.sender`), node and coin type, valid until `expires`, which is at most
+    ///      resolver (`msg.sender`), node and coin type, valid until and including `expires`, at most
     ///      `MAX_VALIDITY` ahead.
     function _verifySigned(
         bytes32 node,

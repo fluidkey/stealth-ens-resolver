@@ -13,8 +13,9 @@ import {LibEcrecover} from "./LibEcrecover.sol";
 ///        stealth address = address(P_spend + s_h·G)
 ///      secp256k1 multiplication runs on `ecrecover` (`LibEcrecover`), which yields the address of
 ///      a·G + b·Q, never coordinates. Hashing S needs its coordinates, so the gateway supplies S and
-///      the verifier checks address(S) against address(e·P_view); passing with a wrong S takes a
-///      160-bit second preimage of keccak256. Two `ecrecover` calls, no curve library.
+///      the verifier checks address(S) against address(e·P_view). Passing with a wrong S takes
+///      about 2^80 work, as the gateway also picks e, and gains it nothing it cannot get by
+///      choosing its own e. Two `ecrecover` calls, no curve library.
 ///      `verificationData` = e || S.x || S.y, 32 bytes each.
 ///      No state and no owner: as immutable as the resolver (ENSIP-30 Section 5).
 contract Scheme1Verifier is IStealthVerifier {

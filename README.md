@@ -134,7 +134,9 @@ the meta-address it is verified against. This is the ENSIP's trust model for wil
 registered name is its own authority and reads nothing from its ancestors, so a parent's config never
 reaches it: no gateway URLs means no gateway, and its static address records are forwarded as set.
 To use a parent's gateway, a registered name sets the same URLs itself. Its owner should be the only
-holder of `ROLE_SET_RESOLVER` on it.
+holder of `ROLE_SET_RESOLVER` on it. A parent that can still change the name's registry entry (swap
+its subregistry, unregister it, grant roles in it) governs it anyway, as the ENSIP's trust model
+says.
 
 **Re-registration and transfer.** State is keyed by the authority's ENSv2 resource, which the
 registry renews when an expired name is registered again, to anyone. A previous holder's config and
@@ -184,12 +186,13 @@ the SDK, and wallets built on it, use.
 
 The EVM has no secp256k1 arithmetic except `ecrecover`, which can compute `a·G + b·Q` but returns
 only the result's address. That covers the last step. Hashing `S` needs its coordinates, so the
-gateway sends `S` and the verifier checks that its address is that of `e·P_view`; a different `S`
-with the same address is a 160-bit second preimage of keccak256. Two `ecrecover` calls, no curve
-library: `LibEcrecover` holds the construction, the one Chainlink's VRF verifier uses in production,
-and its tests check it against Chainlink's code and against direct key derivation. Scheme 1's
-`verificationData` is therefore 96 bytes, `e || S.x || S.y` (the ENSIP leaves the format to each
-scheme); a gateway computes `S` anyway.
+gateway sends `S` and the verifier checks that its address is that of `e·P_view`. Passing a wrong
+`S` takes about 2^80 work (the gateway also picks `e`) and gains nothing a gateway cannot get by
+choosing its own `e`. Two `ecrecover` calls, no curve library: `LibEcrecover` holds the
+construction, the one Chainlink's VRF verifier uses in production, and its tests check it against
+Chainlink's code and against direct key derivation. Scheme 1's `verificationData` is therefore 96
+bytes, `e || S.x || S.y` (the ENSIP leaves the format to each scheme); a gateway computes `S`
+anyway.
 
 The meta-address must be two compressed keys whose x-coordinates are below the group order `n`;
 anything else, including the one in about 2^128 valid keys at or above `n` that `ecrecover` cannot
