@@ -217,13 +217,13 @@ keys and cannot detect ones a sender derived.
 | `verifiers/LibEcrecover` | secp256k1 `a·G + b·Q` on `ecrecover`, shared by the verifiers |
 
 ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCoder`, `ENSIP19`
-(ens-contracts); `LibRegistry`, `RegistryRolesLib` and the registry interfaces (namechain).
+(ens-contracts); `LibResolution`, `RegistryRolesLib` and the registry interfaces (namechain).
 
 ## Size and gas
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 20,600 | 3,976 |
+| `StealthResolver` | 20,825 | 3,751 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
 | `FluidkeyVerifier` | 5,518 | 19,058 |
 | `FluidkeySigners` | 894 | 23,682 |
@@ -236,19 +236,19 @@ read cost.
 
 | Path | Gas |
 |---|---|
-| `resolve` wildcard name, address, `OffchainLookup` revert | 40,840 |
-| `resolve` registered name, address, `OffchainLookup` revert | 23,239 |
-| `resolveStealthCallback`, unverified (wildcard name) | 43,675 + verifier |
-| `resolveStealthCallback`, verified (registered name) | 29,100 + verifier |
-| `resolve` registered name, `verifyStealthResolution` | 26,828 + verifier |
+| `resolve` wildcard name, address, `OffchainLookup` revert | 40,930 |
+| `resolve` registered name, address, `OffchainLookup` revert | 23,330 |
+| `resolveStealthCallback`, unverified (wildcard name) | 43,765 + verifier |
+| `resolveStealthCallback`, verified (registered name) | 29,191 + verifier |
+| `resolve` registered name, `verifyStealthResolution` | 26,918 + verifier |
 | `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,122 |
 | `FluidkeyVerifier.verify`, verified mode, auto-earn Safe | 19,165 |
 | `FluidkeyVerifier.verify`, signed unverified response | 12,183 |
-| `resolve` text, forwarded to a `PermissionedResolver` | 61,253 |
-| `text` on the `PermissionedResolver` directly (reference) | 3,261 |
-| `setConfig`, records resolver and one URL (transaction) | 140,884 |
-| `setChains`, one chain (transaction) | 88,931 |
-| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 156,409 |
+| `resolve` text, forwarded to a `PermissionedResolver` | 43,378 |
+| `resolve` text on the `PermissionedResolver` directly (reference) | 6,425 |
+| `setConfig`, records resolver and one URL (transaction) | 140,996 |
+| `setChains`, one chain (transaction) | 89,043 |
+| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 156,525 |
 
 ## Build and test
 
@@ -304,15 +304,16 @@ at a local draft). `verify-canonical-build.sh` checks that this repo's dependenc
 
 | Dependency | Pin | Notes |
 |---|---|---|
-| [ensdomains/namechain](https://github.com/ensdomains/namechain) | `48b3e2d` (2026-07-03, post-audit) | ENSv2 contracts and test fixtures |
-| [ensdomains/ens-contracts](https://github.com/ensdomains/ens-contracts) | `3b1cc22`, the commit namechain pins | resolver interfaces, CCIP-Read helpers |
+| [ensdomains/namechain](https://github.com/ensdomains/namechain) | `62778d8`, tag `v2-mainnet-deployment-1` (2026-10-02) | ENSv2 contracts and test fixtures |
+| [ensdomains/ens-contracts](https://github.com/ensdomains/ens-contracts) | `121dc23`, the commit namechain pins | resolver interfaces, CCIP-Read helpers |
 | [OpenZeppelin/openzeppelin-contracts](https://github.com/OpenZeppelin/openzeppelin-contracts) | `e4f7021` (v5) and `54b3f14` (v4), as namechain pins | |
 | [foundry-rs/forge-std](https://github.com/foundry-rs/forge-std) | latest at setup | tests only |
 
 ens-contracts and OpenZeppelin are used from namechain's own submodules, so their versions cannot
 drift from what ENSv2 is built and audited against. Compiler settings match ENSv2's production
-build: solc 0.8.25, EVM `cancun`, optimizer at 1000 runs. Re-pin namechain to the ENSv2 mainnet
-release before deploying.
+build: solc 0.8.25, EVM `cancun`, optimizer at 1000 runs. namechain is pinned to its ENSv2 mainnet
+release tag; the Sepolia fork test uses the deployment that tag's `docs/addresses/sepolia.md`
+lists (2026-10-01).
 
 `remappings.txt` mirrors namechain's. Two of namechain's lines (OpenZeppelin v4 for ens-contracts,
 and an `mcopy` variant of ens-contracts' `LibMem`) do not take effect under Foundry in either repo;

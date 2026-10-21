@@ -66,8 +66,8 @@ contract StealthResolverE2ETest is StealthResolverFixture {
 
     function test_multicall_mixesForwardedAndStealth() public {
         vm.startPrank(fluidkey);
-        fkeyRecords.setText(bobNode, "avatar", "ipfs://bob");
-        fkeyRecords.setContenthash(bobNode, hex"e301");
+        fkeyRecords.setText(dns("bob.fkey.eth"), "avatar", "ipfs://bob");
+        fkeyRecords.setContenthash(dns("bob.fkey.eth"), hex"e301");
         vm.stopPrank();
         gwClaimed = makeAddr("chosen");
         gwVerificationData = "ok";
@@ -90,7 +90,7 @@ contract StealthResolverE2ETest is StealthResolverFixture {
     /// @dev The node-checked form is split the same way; the node is checked against the name.
     function test_multicallWithNodeCheck_mixesForwardedAndStealth() public {
         vm.prank(fluidkey);
-        fkeyRecords.setText(bobNode, "avatar", "ipfs://bob");
+        fkeyRecords.setText(dns("bob.fkey.eth"), "avatar", "ipfs://bob");
         gwClaimed = makeAddr("chosen");
         gwVerificationData = "ok";
 
@@ -116,7 +116,7 @@ contract StealthResolverE2ETest is StealthResolverFixture {
     function test_multicall_failingItemCarriesItsError() public {
         setUpAliceVerified(COIN_ETH);
         vm.prank(alice);
-        aliceRecords.setText(aliceNode, "url", "https://alice.example");
+        aliceRecords.setText(dns("alice.fkey.eth"), "url", "https://alice.example");
         gwClaimed = makeAddr("attacker"); // lying gateway: the address item fails, the rest resolves
         gwVerificationData = VD;
 
@@ -219,7 +219,7 @@ contract StealthResolverE2ETest is StealthResolverFixture {
 
     function test_ur_multicall() public {
         vm.prank(fluidkey);
-        fkeyRecords.setText(bobNode, "avatar", "ipfs://bob");
+        fkeyRecords.setText(dns("bob.fkey.eth"), "avatar", "ipfs://bob");
         gwClaimed = makeAddr("chosen");
         gwVerificationData = "ok";
         bytes[] memory calls = new bytes[](2);

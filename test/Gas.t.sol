@@ -3,6 +3,7 @@ pragma solidity 0.8.25;
 
 import {EIP3668} from "@ens/contracts/ccipRead/EIP3668.sol";
 import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol";
+import {IExtendedResolver} from "@ens/contracts/resolvers/profiles/IExtendedResolver.sol";
 import {ITextResolver} from "@ens/contracts/resolvers/profiles/ITextResolver.sol";
 
 import {IStealthResolver} from "../src/interfaces/IStealthResolver.sol";
@@ -50,7 +51,7 @@ contract GasTest is StealthResolverFixture {
     function test_gas_reads() public {
         setUpAliceVerified(COIN_ETH);
         vm.prank(fluidkey);
-        fkeyRecords.setText(bobNode, "avatar", "ipfs://bob");
+        fkeyRecords.setText(dns("bob.fkey.eth"), "avatar", "ipfs://bob");
 
         bytes memory wildcardAddr = abi.encodeCall(
             resolver.resolve, (dns("bob.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (bobNode)))
@@ -95,11 +96,15 @@ contract GasTest is StealthResolverFixture {
                 )
             )
         );
+        // The ENSv2 PermissionedResolver answers reads only through `resolve()`.
         assertTrue(
             _measure(
-                "PermissionedResolver_text_direct_reference",
+                "PermissionedResolver_resolveText_direct_reference",
                 address(fkeyRecords),
-                abi.encodeCall(ITextResolver.text, (bobNode, "avatar"))
+                abi.encodeCall(
+                    IExtendedResolver.resolve,
+                    (dns("bob.fkey.eth"), abi.encodeCall(ITextResolver.text, (bobNode, "avatar")))
+                )
             )
         );
         assertTrue(

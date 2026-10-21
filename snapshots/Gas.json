@@ -1,15 +1,15 @@
 {
   "FluidkeyVerifier_verify_signed": "12183",
   "FluidkeyVerifier_verify_verified": "19165",
-  "PermissionedResolver_text_direct_reference": "3261",
+  "PermissionedResolver_resolveText_direct_reference": "6425",
   "Scheme1Verifier_verify": "16122",
-  "resolveStealthCallback_unverified": "43675",
-  "resolveStealthCallback_verified_mockVerifier": "29100",
-  "resolve_forwardedText_PermissionedResolver": "61253",
-  "resolve_registeredAddr_offchainLookup": "23239",
-  "resolve_verifyStealthResolution_mockVerifier": "26828",
-  "resolve_wildcardAddr_offchainLookup": "40840",
-  "setChains_oneChain": "88931",
-  "setConfig_recordsResolver_oneUrl": "140884",
-  "setMetaAddress_67bytes": "156409"
+  "resolveStealthCallback_unverified": "43765",
+  "resolveStealthCallback_verified_mockVerifier": "29191",
+  "resolve_forwardedText_PermissionedResolver": "43378",
+  "resolve_registeredAddr_offchainLookup": "23330",
+  "resolve_verifyStealthResolution_mockVerifier": "26918",
+  "resolve_wildcardAddr_offchainLookup": "40930",
+  "setChains_oneChain": "89043",
+  "setConfig_recordsResolver_oneUrl": "140996",
+  "setMetaAddress_67bytes": "156525"
 }

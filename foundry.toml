@@ -1,5 +1,5 @@
 # Compiler settings match the ENSv2 canonical contracts
-# (ensdomains/namechain@48b3e2d, contracts/hardhat.config.ts): solc 0.8.25, cancun, 1000 runs.
+# (ensdomains/namechain@62778d8, contracts/hardhat.config.ts): solc 0.8.25, cancun, 1000 runs.
 [profile.default]
 src = "src"
 out = "out"

@@ -40,8 +40,8 @@ contract StealthResolverForwardTest is StealthResolverFixture {
     function test_ownRecordsResolver() public {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
         vm.startPrank(alice);
-        aliceRecords.setText(aliceNode, "url", "https://alice.example");
-        aliceRecords.setContenthash(aliceNode, hex"e301");
+        aliceRecords.setText(dns("alice.fkey.eth"), "url", "https://alice.example");
+        aliceRecords.setContenthash(dns("alice.fkey.eth"), hex"e301");
         vm.stopPrank();
         assertEq(_text("alice.fkey.eth", "url"), "https://alice.example");
         bytes memory v = resolver.resolve(
@@ -52,7 +52,7 @@ contract StealthResolverForwardTest is StealthResolverFixture {
 
     function test_wildcardInheritsParentsRecordsResolver() public {
         vm.prank(fluidkey);
-        fkeyRecords.setText(bobNode, "avatar", "ipfs://bob");
+        fkeyRecords.setText(dns("bob.fkey.eth"), "avatar", "ipfs://bob");
         assertEq(_text("bob.fkey.eth", "avatar"), "ipfs://bob");
     }
 
@@ -98,7 +98,7 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         ];
         vm.startPrank(alice);
         for (uint256 i; i < others.length; ++i) {
-            aliceRecords.setData(aliceNode, others[i], abi.encode(i));
+            aliceRecords.setData(dns("alice.fkey.eth"), others[i], abi.encode(i));
         }
         vm.stopPrank();
         for (uint256 i; i < others.length; ++i) {
@@ -109,7 +109,7 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         // an EVM chain, so never listed, so empty.
         string memory largest = stealthKey(type(uint256).max); // external call: before vm.prank
         vm.prank(alice);
-        aliceRecords.setData(aliceNode, largest, META);
+        aliceRecords.setData(dns("alice.fkey.eth"), largest, META);
         assertEq(
             _data("alice.fkey.eth", stealthKey(type(uint256).max)).length,
             0,
@@ -130,7 +130,7 @@ contract StealthResolverForwardTest is StealthResolverFixture {
     function test_stealthKeyInRecordsResolverIgnored() public {
         string memory key = stealthKey(COIN_ETH);
         vm.prank(alice);
-        aliceRecords.setData(aliceNode, key, META);
+        aliceRecords.setData(dns("alice.fkey.eth"), key, META);
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
         assertEq(_data("alice.fkey.eth", key).length, 0);
     }
@@ -142,7 +142,7 @@ contract StealthResolverForwardTest is StealthResolverFixture {
     ///      and cannot reach a static address in the records resolver.
     function test_multicallWithNodeCheck_splitLikeMulticall() public {
         vm.prank(fluidkey);
-        fkeyRecords.setAddr(bobNode, address(0xBEEF));
+        fkeyRecords.setAddress(dns("bob.fkey.eth"), COIN_ETH, abi.encodePacked(address(0xBEEF)));
         bytes[] memory calls = new bytes[](1);
         calls[0] = abi.encodeCall(IAddrResolver.addr, (bobNode));
         EIP3668.Params memory p = expectLookup(
@@ -170,7 +170,7 @@ contract StealthResolverForwardTest is StealthResolverFixture {
     ///      static address in the records resolver stays readable through them.
     function test_otherSelectorsReachStaticAddress() public {
         vm.prank(fluidkey);
-        fkeyRecords.setAddr(bobNode, address(0xBEEF));
+        fkeyRecords.setAddress(dns("bob.fkey.eth"), COIN_ETH, abi.encodePacked(address(0xBEEF)));
         bytes memory v = resolver.resolve(
             dns("bob.fkey.eth"), abi.encodeCall(IHasAddressResolver.hasAddr, (bobNode, COIN_ETH))
         );
@@ -182,7 +182,7 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         resolver.setConfig(dns("fkey.eth"), address(fkeyRecords), new string[](0));
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
         vm.prank(alice);
-        aliceRecords.setAddr(aliceNode, address(0xBEEF));
+        aliceRecords.setAddress(dns("alice.fkey.eth"), COIN_ETH, abi.encodePacked(address(0xBEEF)));
         bytes memory v =
             resolver.resolve(dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode)));
         assertEq(abi.decode(v, (address)), address(0xBEEF));

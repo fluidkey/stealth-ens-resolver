@@ -9,6 +9,7 @@ import {IUniversalResolver} from "@ens/contracts/universalResolver/IUniversalRes
 import {BytesUtils} from "@ens/contracts/utils/BytesUtils.sol";
 import {NameCoder} from "@ens/contracts/utils/NameCoder.sol";
 import {VerifiableFactory} from "@ensdomains/verifiable-factory/VerifiableFactory.sol";
+import {Grant} from "~src/access-control/interfaces/IEACGrantInitializable.sol";
 import {EACBaseRolesLib} from "~src/access-control/libraries/EACBaseRolesLib.sol";
 import {IPermissionedRegistry} from "~src/registry/interfaces/IPermissionedRegistry.sol";
 import {IRegistry} from "~src/registry/interfaces/IRegistry.sol";
@@ -28,21 +29,22 @@ import {TEST_META} from "../utils/Constants.sol";
 ///      Pinned to a block where LABEL is available, so the test cannot break when the label is
 ///      registered later; the RPC must serve historical state (archive).
 contract SepoliaENSv2ForkTest is CCIPClient {
-    uint256 internal constant FORK_BLOCK = 11_906_000; // 2026-10-13, LABEL available
+    // The deployment of 2026-10-01 (namechain v2-mainnet-deployment-1).
+    uint256 internal constant FORK_BLOCK = 11_962_500; // 2026-10-21, LABEL available
 
     IRegistry internal constant ROOT_REGISTRY =
-        IRegistry(0x11b5BfbE9078D826b1eDBDd1cFC12f5828D9F50C);
+        IRegistry(0xB458D6a3a77919449d03e7A6903C26827c1eC43f);
     IPermissionedRegistry internal constant ETH_REGISTRY =
-        IPermissionedRegistry(0x67b728a792e789a8978b30cF1b3b641f19354b43);
-    address internal constant ETH_REGISTRAR = 0xa4449a0dD2b83007553D9b1d28b583A46A805a30;
+        IPermissionedRegistry(0xD4eBcbBdF463C9c45784603Db0dDD499BC44A8B4);
+    address internal constant ETH_REGISTRAR = 0xf633e7FC17e2bbE0D0965D18ec1821dcB754a3d3;
     IGatewayProvider internal constant BATCH_GATEWAYS =
         IGatewayProvider(0xE4e7245716d12D0F6AeA01DFe0E635C43D7D083c);
     VerifiableFactory internal constant FACTORY =
-        VerifiableFactory(0x118Bc31A50d559F7015a8Da26d54B3b030CdB70F);
+        VerifiableFactory(0xDa70306C98E97eCe36F997a21368e53298572991);
     address internal constant PERMISSIONED_RESOLVER_IMPL =
-        0x7E4B2d59938930168024201752EE5503df402303;
+        0x115eb53F0c60696633855F90b138178Fb40b2b2C;
     IUniversalResolver internal constant UR =
-        IUniversalResolver(0x85eDf8B6b7D4211e2b07AA687506B746357B92cf);
+        IUniversalResolver(0x24E1D8e068620B647CA097f961A61055f4f42D72);
 
     string internal constant LABEL = "ensip30-stealth-resolver-fork-test";
     bytes internal constant VD = hex"c0ffee";
@@ -80,17 +82,17 @@ contract SepoliaENSv2ForkTest is CCIPClient {
         name = NameCoder.encode(string.concat(LABEL, ".eth"));
         nameNode = NameCoder.namehash(name, 0);
 
-        bytes memory init = abi.encodeCall(
-            PermissionedResolver.initialize,
-            (alice, EACBaseRolesLib.ALL_ROLES | EACBaseRolesLib.ADMIN_ROLES, new bytes[](0))
-        );
+        Grant[] memory grants = new Grant[](1);
+        grants[0] = Grant(alice, EACBaseRolesLib.ALL_ROLES | EACBaseRolesLib.ADMIN_ROLES);
+        bytes memory init =
+            abi.encodeCall(PermissionedResolver.initialize, (grants, new bytes[](0)));
         vm.prank(alice);
         records = PermissionedResolver(
             FACTORY.deployProxy(PERMISSIONED_RESOLVER_IMPL, uint256(keccak256(init)), init)
         );
 
         vm.startPrank(alice);
-        records.setText(nameNode, "url", "https://alice.example");
+        records.setText(name, "url", "https://alice.example");
         resolver.setConfig(name, address(records), _urls());
         uint256[] memory chains = new uint256[](1);
         chains[0] = 60;

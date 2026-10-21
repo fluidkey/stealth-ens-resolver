@@ -20,7 +20,7 @@ import {NameCoder} from "@ens/contracts/utils/NameCoder.sol";
 import {IPermissionedRegistry} from "@ensv2/registry/interfaces/IPermissionedRegistry.sol";
 import {IRegistry} from "@ensv2/registry/interfaces/IRegistry.sol";
 import {RegistryRolesLib} from "@ensv2/registry/libraries/RegistryRolesLib.sol";
-import {LibRegistry} from "@ensv2/universalResolver/libraries/LibRegistry.sol";
+import {LibResolution} from "@ensv2/universalResolver/libraries/LibResolution.sol";
 
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {ERC165} from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
@@ -488,7 +488,7 @@ contract StealthResolver is
     function _context(bytes memory name) internal view returns (NameState memory ctx) {
         // registries[i]: the subregistry of the name at label i (leaf = 0); the last entry is the
         // root registry. Label i sits in registries[i + 1].
-        IRegistry[] memory registries = LibRegistry.findRegistries(ROOT_REGISTRY, name, 0);
+        IRegistry[] memory registries = LibResolution.findRegistries(ROOT_REGISTRY, name, 0);
         uint256 offset;
         for (uint256 i; i + 2 < registries.length; ++i) {
             (bytes32 labelHash, uint256 next) = NameCoder.readLabel(name, offset);

@@ -166,7 +166,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         setUpAliceVerified(COIN_ETH);
         bytes memory baseStatic = abi.encodePacked(makeAddr("aliceBase"));
         vm.prank(alice);
-        aliceRecords.setAddr(aliceNode, COIN_BASE, baseStatic);
+        aliceRecords.setAddress(dns("alice.fkey.eth"), COIN_BASE, baseStatic);
         bytes memory v = resolver.resolve(
             dns("alice.fkey.eth"), abi.encodeCall(IAddressResolver.addr, (aliceNode, COIN_BASE))
         );
@@ -178,7 +178,9 @@ contract StealthResolverAddrTest is StealthResolverFixture {
     function test_listedChain_stealthWinsOverStatic() public {
         setUpAliceVerified(COIN_ETH);
         vm.prank(alice);
-        aliceRecords.setAddr(aliceNode, makeAddr("aliceStatic"));
+        aliceRecords.setAddress(
+            dns("alice.fkey.eth"), COIN_ETH, abi.encodePacked(makeAddr("aliceStatic"))
+        );
         (bool ok, bytes memory v) = callback(_lookup("alice.fkey.eth"), abi.encode(_derived(), VD));
         assertTrue(ok);
         assertEq(_resolved(v), _derived());
@@ -189,7 +191,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         setUpAliceVerified(COIN_ETH);
         address aliceStatic = makeAddr("aliceStatic");
         vm.prank(alice);
-        aliceRecords.setAddr(aliceNode, aliceStatic);
+        aliceRecords.setAddress(dns("alice.fkey.eth"), COIN_ETH, abi.encodePacked(aliceStatic));
         setChain(alice, "alice.fkey.eth", COIN_ETH, false);
         bytes memory v =
             resolver.resolve(dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode)));
@@ -263,7 +265,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
     function test_registeredNameDoesNotInheritGateway() public {
         address aliceStatic = makeAddr("aliceStatic");
         vm.prank(alice);
-        aliceRecords.setAddr(aliceNode, aliceStatic);
+        aliceRecords.setAddress(dns("alice.fkey.eth"), COIN_ETH, abi.encodePacked(aliceStatic));
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
         bytes memory v =
             resolver.resolve(dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode)));
@@ -291,7 +293,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         bytes memory btc = hex"0014aabbccddeeff00112233445566778899aabbccdd";
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
         vm.prank(alice);
-        aliceRecords.setAddr(aliceNode, 0, btc);
+        aliceRecords.setAddress(dns("alice.fkey.eth"), 0, btc);
         bytes memory v = resolver.resolve(
             dns("alice.fkey.eth"), abi.encodeCall(IAddressResolver.addr, (aliceNode, 0))
         );

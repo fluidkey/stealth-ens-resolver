@@ -3,9 +3,14 @@ pragma solidity 0.8.25;
 
 import {BytesUtils} from "@ens/contracts/utils/BytesUtils.sol";
 import {NameCoder} from "@ens/contracts/utils/NameCoder.sol";
+import {
+    Grant,
+    IEACGrantInitializable
+} from "~src/access-control/interfaces/IEACGrantInitializable.sol";
 import {EACBaseRolesLib} from "~src/access-control/libraries/EACBaseRolesLib.sol";
 import {UserRegistry} from "~src/registry/UserRegistry.sol";
 import {IRegistry} from "~src/registry/interfaces/IRegistry.sol";
+import {IRegistryURIRenderer} from "~src/registry/interfaces/IRegistryURIRenderer.sol";
 import {RegistryRolesLib} from "~src/registry/libraries/RegistryRolesLib.sol";
 import {PermissionedResolver} from "~src/resolver/PermissionedResolver.sol";
 import {V1Fixture} from "~test/fixtures/V1Fixture.sol";
@@ -31,6 +36,7 @@ abstract contract StealthResolverFixture is V1Fixture, V2Fixture, CCIPClient {
     StealthResolver internal resolver;
     MockVerifier internal verifier;
     PermissionedResolver internal resolverImpl;
+    UserRegistry internal userRegistryImpl;
     UserRegistry internal fkeyRegistry;
     PermissionedResolver internal fkeyRecords;
     PermissionedResolver internal aliceRecords;
@@ -50,6 +56,8 @@ abstract contract StealthResolverFixture is V1Fixture, V2Fixture, CCIPClient {
         verifier = new MockVerifier();
         resolver = new StealthResolver(rootRegistry, verifier, batchGatewayProvider);
         resolverImpl = new PermissionedResolver(address(this));
+        userRegistryImpl =
+            new UserRegistry(labelStore, IRegistryURIRenderer(address(0)), address(this));
         expiry = uint64(block.timestamp + 365 days);
 
         fkeyRegistry = deployUserRegistry(
@@ -107,13 +115,30 @@ abstract contract StealthResolverFixture is V1Fixture, V2Fixture, CCIPClient {
 
     /// @dev An unmodified ENSv2 PermissionedResolver proxy with `admin` holding every role.
     function deployRecords(address admin) internal returns (PermissionedResolver) {
-        bytes memory init = abi.encodeCall(
-            PermissionedResolver.initialize,
-            (admin, EACBaseRolesLib.ALL_ROLES | EACBaseRolesLib.ADMIN_ROLES, new bytes[](0))
-        );
+        Grant[] memory grants = new Grant[](1);
+        grants[0] = Grant(admin, EACBaseRolesLib.ALL_ROLES | EACBaseRolesLib.ADMIN_ROLES);
+        bytes memory init =
+            abi.encodeCall(PermissionedResolver.initialize, (grants, new bytes[](0)));
         return PermissionedResolver(
             verifiableFactory.deployProxy(
                 address(resolverImpl), uint256(keccak256(abi.encode(admin))), init
+            )
+        );
+    }
+
+    /// @dev An unmodified ENSv2 UserRegistry proxy with `owner` holding `roleBitmap` on its root.
+    ///      namechain's V2Fixture provided this until v2-mainnet-deployment-1.
+    function deployUserRegistry(address owner, uint256 roleBitmap, uint256 salt)
+        internal
+        returns (UserRegistry)
+    {
+        Grant[] memory grants = new Grant[](1);
+        grants[0] = Grant(owner, roleBitmap);
+        return UserRegistry(
+            verifiableFactory.deployProxy(
+                address(userRegistryImpl),
+                salt,
+                abi.encodeCall(IEACGrantInitializable.initialize, (grants))
             )
         );
     }
