@@ -166,6 +166,16 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         );
     }
 
+    /// @dev `schemeId()` through `resolve()` is this resolver's, for any name and even with a
+    ///      records resolver that answers it (ENSIP-30 Section 5).
+    function test_schemeIdThroughResolve() public {
+        setConfig(alice, "alice.fkey.eth", address(new MockOffchainRecords()), "");
+        bytes memory call = abi.encodeWithSignature("schemeId()");
+        assertEq(abi.decode(resolver.resolve(dns("alice.fkey.eth"), call), (uint256)), 1);
+        assertEq(abi.decode(resolver.resolve(dns("bob.fkey.eth"), call), (uint256)), 1);
+        assertEq(abi.decode(resolver.resolve(dns("nobody.eth"), call), (uint256)), 1);
+    }
+
     /// @dev A nested `resolve(name, resolve(name, addr(...)))` is refused, alone and as a multicall
     ///      item, so it cannot reach a static address through a records resolver that executes
     ///      inner calldata.

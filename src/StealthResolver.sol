@@ -469,6 +469,8 @@ contract StealthResolver is
         if (selector == IExtendedResolver.resolve.selector) {
             revert IUniversalResolver.UnsupportedResolverProfile(selector);
         }
+        // ENSIP-30 Section 5: the functions of IStealthResolver are resolved through resolve().
+        if (selector == IStealthResolver.schemeId.selector) return abi.encode(_SCHEME_ID);
         NameState memory ctx = _context(name);
         Config storage c = _configs[ctx.key];
         if (selector == IStealthResolver.gatewayURLs.selector) {
