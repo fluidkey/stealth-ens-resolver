@@ -275,7 +275,9 @@ and whoever deploys code at that address would control those Safes. This relies 
 being deployable only by Fluidkey's multisig.
 
 Both modes require a signature by an account that `FluidkeySigners` lists (EIP-712, domain
-`FluidkeyVerifier`, version `1`), bound to the resolver, name and chain:
+`FluidkeyVerifier`, version `1`), bound to the resolver, name and chain. It is 65 bytes,
+`r || s || v` with `v` 27 or 28 and low `s`; `v` as 0 or 1 and the 64-byte compact form fail as
+`UnknownSigner`. The two modes:
 
 - Verified mode: `verificationData` is `e || S.x || S.y || signature`, 161 bytes. The derivation is
   checked as for scheme 1, with two `ecrecover` calls, and the signature is over

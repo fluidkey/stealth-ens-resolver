@@ -391,6 +391,25 @@ contract FluidkeyVerifierTest is Test {
         );
     }
 
+    /// @dev The signature format the gateway uses (README): 65 bytes r || s || v, v 27 or 28. The
+    ///      same signature with v as 0 or 1, or in EIP-2098 compact form, is refused.
+    function test_unverified_signatureFormat() public {
+        address claimed = makeAddr("safe");
+        uint64 expires = uint64(block.timestamp + 300);
+        bytes memory sig = _sign(SIGNER_KEY, resolver, node, 60, claimed, expires);
+        (bytes32 r, bytes32 s) = abi.decode(sig, (bytes32, bytes32));
+        uint8 v = uint8(sig[64]);
+        bytes32 vs = bytes32(uint256(s) | (uint256(v - 27) << 255));
+        bytes[2] memory refused = [abi.encodePacked(r, s, v - 27), abi.encodePacked(r, vs)];
+        assertEq(_unverified(resolver, node, 60, abi.encode(expires, sig), claimed), bytes4(0));
+        for (uint256 i; i < refused.length; ++i) {
+            assertEq(
+                _unverified(resolver, node, 60, abi.encode(expires, refused[i]), claimed),
+                FluidkeyVerifier.UnknownSigner.selector
+            );
+        }
+    }
+
     /// @dev A signed zero address is an unset record.
     function test_unverified_signedZero() public {
         uint64 expires = uint64(block.timestamp);
