@@ -158,8 +158,10 @@ contract StealthResolver is
     ///         cannot be walked through the registry to the name's authority.
     error ResolveOnly(bytes4 selector);
 
-    /// @notice The gateway's address does not derive from the name's meta-address.
-    error StealthAddressMismatch(address claimed, address derived);
+    /// @notice The gateway's address does not derive from the name's meta-address. No arguments:
+    ///         in a multicall a failed item is returned as data, and an argument the gateway
+    ///         chose could read as an address to a client that skips the error marker.
+    error StealthAddressMismatch();
 
     /// @notice No stealth meta-address record for `node` and `coinType`.
     error NoStealthRecord(bytes32 node, uint256 coinType);
@@ -635,7 +637,7 @@ contract StealthResolver is
             verificationData,
             claimed
         );
-        if (derived != claimed) revert StealthAddressMismatch(claimed, derived);
+        if (derived != claimed) revert StealthAddressMismatch();
         return claimed;
     }
 

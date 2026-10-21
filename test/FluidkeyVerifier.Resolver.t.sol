@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.25;
 
+import {IMulticallable} from "@ens/contracts/resolvers/IMulticallable.sol";
 import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol";
 import {IAddressResolver} from "@ens/contracts/resolvers/profiles/IAddressResolver.sol";
 
@@ -108,12 +109,7 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
         gwVerificationData = _signedDerivation(aliceNode);
         (bool ok, bytes memory result) = _addr("alice.fkey.eth");
         assertFalse(ok);
-        assertEq(
-            result,
-            abi.encodeWithSelector(
-                StealthResolver.StealthAddressMismatch.selector, attacker, v.stealthAddress
-            )
-        );
+        assertEq(result, abi.encodeWithSelector(StealthResolver.StealthAddressMismatch.selector));
     }
 
     /// @dev A derivation without the signature, as a batch gateway answering from its own
@@ -129,6 +125,27 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
         (ok, result) = _addr("alice.fkey.eth");
         assertFalse(ok);
         assertEq(bytes4(result), FluidkeyVerifier.UnknownSigner.selector);
+    }
+
+    /// @dev In a multicall a failed item is returned as data. A valid derivation with a crafted
+    ///      signature fails as `UnknownSigner(0)`, so a client that decodes the item as an address
+    ///      without checking the error marker reads no address, not one the gateway chose.
+    function test_verified_multicallFailureCarriesNoGatewayWord() public {
+        bytes32 s = bytes32(abi.encodePacked(bytes8(0xffffffffffffffff), makeAddr("x"), bytes4(0)));
+        gwClaimed = v.stealthAddress;
+        gwVerificationData = abi.encodePacked(v.verificationData, bytes32(uint256(1)), s, uint8(27));
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = abi.encodeCall(IAddrResolver.addr, (aliceNode));
+        (bool ok, bytes memory r) = ccipCall(
+            address(resolver),
+            abi.encodeCall(
+                resolver.resolve,
+                (dns("alice.fkey.eth"), abi.encodeCall(IMulticallable.multicall, (calls)))
+            )
+        );
+        assertTrue(ok);
+        bytes memory item = abi.decode(abi.decode(r, (bytes)), (bytes[]))[0];
+        assertEq(item, abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector, address(0)));
     }
 
     /// @dev A chain FK1 does not support fails the lookup even when the name lists it.

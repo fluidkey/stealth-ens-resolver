@@ -47,12 +47,7 @@ contract Scheme1VerifierResolverTest is StealthResolverFixture {
         gwVerificationData = v.verificationData;
         (bool ok, bytes memory result) = _addr("alice.fkey.eth");
         assertFalse(ok);
-        assertEq(
-            result,
-            abi.encodeWithSelector(
-                StealthResolver.StealthAddressMismatch.selector, attacker, v.stealthAddress
-            )
-        );
+        assertEq(result, abi.encodeWithSelector(StealthResolver.StealthAddressMismatch.selector));
     }
 
     /// @dev A gateway that derived for another recipient cannot pass it off as this one's.

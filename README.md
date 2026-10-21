@@ -88,8 +88,10 @@ only if it learns that key. Scheme 1 trusts the batch gateway for this; FK1 requ
 gateway's signature in both modes. A batch gateway can also fail an item; a failed item comes
 back as error data, marked by a length of 4 more than a multiple of 32. `StealthResolver` wraps
 every batch-gateway failure as `UnsafeBatchGatewayResponse(bytes)` (ENS's default lets ones
-starting with `HttpError` or `Error(string)` through), so a client that decodes such an item as an
-address without checking the marker reads no address rather than one the batch gateway picked.
+starting with `HttpError` or `Error(string)` through), and its own errors and the verifiers'
+carry no word a gateway chose (`StealthAddressMismatch()` has no arguments; FK1 reports a
+malformed signature as `UnknownSigner(address(0))`). A client that decodes a failed item as an
+address without checking the marker therefore reads no address rather than one a gateway picked.
 Clients should still check the marker.
 
 ### Who may write
@@ -287,9 +289,9 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 21,608 | 2,968 |
+| `StealthResolver` | 21,589 | 2,987 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
-| `FluidkeyVerifier` | 6,071 | 18,505 |
+| `FluidkeyVerifier` | 5,801 | 18,775 |
 | `FluidkeySigners` | 894 | 23,682 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
@@ -306,8 +308,8 @@ read cost.
 | `resolveStealthCallback`, verified (registered name) | 30,685 + verifier |
 | `resolve` registered name, `verifyStealthResolution` | 27,250 + verifier |
 | `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,122 |
-| `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,709 |
-| `FluidkeyVerifier.verify`, unverified mode, signed | 14,993 |
+| `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,622 |
+| `FluidkeyVerifier.verify`, unverified mode, signed | 14,906 |
 | `resolve` text, forwarded to a `PermissionedResolver` | 43,712 |
 | `resolve` text on the `PermissionedResolver` directly (reference) | 6,426 |
 | `setConfig`, records resolver and one URL (transaction) | 143,394 |

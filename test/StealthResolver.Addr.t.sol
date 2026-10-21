@@ -140,12 +140,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         address attacker = makeAddr("attacker");
         (bool ok, bytes memory v) = callback(_lookup("alice.fkey.eth"), abi.encode(attacker, VD));
         assertFalse(ok);
-        assertEq(
-            v,
-            abi.encodeWithSelector(
-                StealthResolver.StealthAddressMismatch.selector, attacker, _derived()
-            )
-        );
+        assertEq(v, abi.encodeWithSelector(StealthResolver.StealthAddressMismatch.selector));
     }
 
     function test_verified_wrongVerificationDataReverts() public {
@@ -159,12 +154,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         verifier.setOverride(address(0xD1FF));
         (bool ok, bytes memory v) = callback(_lookup("alice.fkey.eth"), abi.encode(_derived(), VD));
         assertFalse(ok);
-        assertEq(
-            v,
-            abi.encodeWithSelector(
-                StealthResolver.StealthAddressMismatch.selector, _derived(), address(0xD1FF)
-            )
-        );
+        assertEq(v, abi.encodeWithSelector(StealthResolver.StealthAddressMismatch.selector));
     }
 
     // Chain lists (static on unlisted chains).
@@ -371,12 +361,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         address attacker = makeAddr("attacker");
         (ok, v) = callback(_lookup("bob.fkey.eth"), abi.encode(attacker, VD));
         assertFalse(ok, "lying gateway");
-        assertEq(
-            v,
-            abi.encodeWithSelector(
-                StealthResolver.StealthAddressMismatch.selector, attacker, _derived()
-            )
-        );
+        assertEq(v, abi.encodeWithSelector(StealthResolver.StealthAddressMismatch.selector));
     }
 
     /// @dev The record served through `resolve(name, data(...))` is the record the callback
@@ -488,11 +473,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         setUpAliceVerified(COIN_ETH);
         address derived = _derived();
         assertEq(_verify("alice.fkey.eth", COIN_ETH, derived), derived);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                StealthResolver.StealthAddressMismatch.selector, address(0xBAD), derived
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(StealthResolver.StealthAddressMismatch.selector));
         resolver.resolve(
             dns("alice.fkey.eth"), _verifyCall("alice.fkey.eth", COIN_ETH, address(0xBAD))
         );
@@ -512,11 +493,7 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         call = abi.encodeCall(
             IStealthResolver.verifyStealthResolution, (bobNode, COIN_ETH, address(0xBAD), VD)
         );
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                StealthResolver.StealthAddressMismatch.selector, address(0xBAD), derived
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(StealthResolver.StealthAddressMismatch.selector));
         resolver.resolve(dns("bob.fkey.eth"), call);
     }
 

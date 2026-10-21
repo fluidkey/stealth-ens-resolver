@@ -110,7 +110,7 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
     /// @notice The signed response's `expires` is more than `MAX_VALIDITY` ahead.
     error ExpiryTooFar(uint64 expires);
 
-    /// @notice `signer` is not a Fluidkey gateway signer.
+    /// @notice `signer` is not a Fluidkey gateway signer; zero if the signature is malformed.
     error UnknownSigner(address signer);
 
     ////////////////////////////////////////////////////////////////////////
@@ -282,9 +282,16 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
         return claimed;
     }
 
-    /// @dev Reverts unless a current Fluidkey gateway signer signed the EIP-712 `structHash`.
+    /// @dev Reverts unless a current Fluidkey gateway signer signed the EIP-712 `structHash`. A
+    ///      malformed signature reverts `UnknownSigner(address(0))`, not OpenZeppelin's errors,
+    ///      whose arguments come from the signature: in a multicall the error is returned as data,
+    ///      and a gateway-chosen word could read as an address to a client that skips the error
+    ///      marker.
     function _checkSigner(bytes32 structHash, bytes memory signature) internal view {
-        address signer = ECDSA.recover(_hashTypedDataV4(structHash), signature);
-        if (!SIGNERS.isSigner(signer)) revert UnknownSigner(signer);
+        (address signer, ECDSA.RecoverError err,) =
+            ECDSA.tryRecover(_hashTypedDataV4(structHash), signature);
+        if (err != ECDSA.RecoverError.NoError || !SIGNERS.isSigner(signer)) {
+            revert UnknownSigner(signer);
+        }
     }
 }

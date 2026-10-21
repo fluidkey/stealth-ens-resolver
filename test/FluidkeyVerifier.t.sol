@@ -4,7 +4,6 @@ pragma solidity 0.8.25;
 import {Test} from "forge-std/Test.sol";
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 import {FluidkeySigners, IFluidkeySigners} from "../src/verifiers/FluidkeySigners.sol";
 import {FluidkeyVerifier} from "../src/verifiers/FluidkeyVerifier.sol";
@@ -339,6 +338,25 @@ contract FluidkeyVerifierTest is Test {
         assertEq(_verified(resolver, node, 60, meta, unverifiedType), unknown, "type");
     }
 
+    /// @dev A malformed signature (high s, bad v) is `UnknownSigner(0)`: the error carries no word
+    ///      the gateway chose, even if the zero address were ever listed as a signer.
+    function test_verified_malformedSignature() public {
+        FluidkeyVectors.Vector memory v = vectors[4];
+        signers.setSigner(address(0), true);
+        bytes32 highS =
+            bytes32(abi.encodePacked(bytes8(0xffffffffffffffff), makeAddr("x"), bytes4(0)));
+        bytes[2] memory sigs = [
+            abi.encodePacked(bytes32(uint256(1)), highS, uint8(27)),
+            abi.encodePacked(bytes32(uint256(1)), bytes32(uint256(1)), uint8(29))
+        ];
+        for (uint256 i; i < sigs.length; ++i) {
+            vm.expectRevert(
+                abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector, address(0))
+            );
+            _verify(v.metaAddress, bytes.concat(v.verificationData, sigs[i]));
+        }
+    }
+
     /// @dev A verified response does not expire: replayed later, it answers the same Safe.
     function test_verified_doesNotExpire() public {
         FluidkeyVectors.Vector memory v = vectors[4];
@@ -467,7 +485,7 @@ contract FluidkeyVerifierTest is Test {
         assertEq(_unverified(resolver, node, 60, verifiedType, claimed), unknown, "type");
     }
 
-    /// @dev The high-s twin of a valid signature is refused (OpenZeppelin ECDSA).
+    /// @dev The high-s twin of a valid signature is refused as malformed: `UnknownSigner(0)`.
     function test_unverified_malleableSignature() public {
         address claimed = makeAddr("safe");
         uint64 expires = uint64(block.timestamp + 300);
@@ -476,10 +494,9 @@ contract FluidkeyVerifierTest is Test {
         uint256 s = uint256(bytes32(_slice(sig, 32, 32)));
         uint8 v = uint8(sig[64]);
         bytes memory twin = abi.encodePacked(r, bytes32(N - s), v == 27 ? uint8(28) : uint8(27));
-        assertEq(
-            _unverified(resolver, node, 60, abi.encode(expires, twin), claimed),
-            ECDSA.ECDSAInvalidSignatureS.selector
-        );
+        vm.prank(resolver);
+        vm.expectRevert(abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector, address(0)));
+        verifier.verify(node, 60, "", abi.encode(expires, twin), claimed);
     }
 
     /// @dev No signature at all: the response does not decode.
