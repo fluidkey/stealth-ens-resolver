@@ -237,15 +237,8 @@ contract FluidkeyVerifier is IStealthVerifier, EIP712 {
         uint256 configHash = uint256(bytes32(metaAddress[33:65]));
 
         if (verificationData.length != 161) revert InvalidVerificationData();
-        uint256 e = uint256(bytes32(verificationData[0:32]));
-        if (e == 0 || e >= LibEcrecover.N) revert InvalidVerificationData();
-
-        // S = e·P_spend. Zero only if the spending key is not on the curve.
-        address shared = LibEcrecover.mulAdd(0, e, spendX, spendParity);
-        if (shared == address(0)) revert MalformedMetaAddress();
-        if (shared != LibEcrecover.pointAddress(verificationData[32:96])) {
-            revert InvalidSharedSecret();
-        }
+        // S = e·P_spend.
+        LibEcrecover.checkSharedSecret(verificationData, spendX, spendParity);
 
         // owner = h·P_spend. Zero only if h ≡ 0 mod n (negligible).
         uint256 h = uint256(keccak256(verificationData[32:96])) % LibEcrecover.N;

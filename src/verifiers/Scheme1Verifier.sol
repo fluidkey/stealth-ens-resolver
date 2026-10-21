@@ -53,15 +53,8 @@ contract Scheme1Verifier is IStealthVerifier {
         if (!spendOk || !viewOk) revert MalformedMetaAddress();
 
         if (verificationData.length != 96) revert InvalidVerificationData();
-        uint256 e = uint256(bytes32(verificationData[0:32]));
-        if (e == 0 || e >= LibEcrecover.N) revert InvalidVerificationData();
-
-        // S = e·P_view. Zero only if the viewing key is not on the curve.
-        address shared = LibEcrecover.mulAdd(0, e, viewX, viewParity);
-        if (shared == address(0)) revert MalformedMetaAddress();
-        if (shared != LibEcrecover.pointAddress(verificationData[32:96])) {
-            revert InvalidSharedSecret();
-        }
+        // S = e·P_view.
+        LibEcrecover.checkSharedSecret(verificationData, viewX, viewParity);
 
         uint256 sy = uint256(bytes32(verificationData[64:96]));
         uint256 sh = uint256(

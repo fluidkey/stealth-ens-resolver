@@ -14,6 +14,16 @@ library LibEcrecover {
     /// @dev The secp256k1 group order.
     uint256 internal constant N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
 
+    /// @notice The meta-address is not well formed for the scheme (ENSIP-30 Section 1).
+    error MalformedMetaAddress();
+
+    /// @notice The ephemeral private key in `verificationData` is not in [1, n).
+    error InvalidVerificationData();
+
+    /// @notice The supplied shared secret point is not the ephemeral key times the key exchanged
+    ///         with.
+    error InvalidSharedSecret();
+
     /// @dev address(a·G + b·Q) for the point Q with x-coordinate `qx` (0 < qx < n) and y parity
     ///      `parity`, or zero if there is no such point or the sum is the point at infinity.
     ///      Requires b·qx ≠ 0 mod n: `ecrecover` rejects s = 0.
@@ -40,6 +50,20 @@ library LibEcrecover {
         x = uint256(bytes32(key[1:33]));
         ok = (prefix == 2 || prefix == 3) && x != 0 && x < N;
         parity = prefix & 1;
+    }
+
+    /// @dev The witness check both verifiers share: `witness` starts with e || S.x || S.y (32 bytes
+    ///      each, length checked by the caller), 0 < e < n, and address(S) = address(e·Q) for the
+    ///      key Q (x-coordinate `qx`, y parity `parity`). Reverts `MalformedMetaAddress` if Q is
+    ///      not on the curve. Hashing S needs its coordinates, which `ecrecover` cannot give, so
+    ///      the gateway supplies them and this checks them by address.
+    function checkSharedSecret(bytes calldata witness, uint256 qx, uint8 parity) internal pure {
+        uint256 e = uint256(bytes32(witness[0:32]));
+        if (e == 0 || e >= N) revert InvalidVerificationData();
+        // e·Q. Zero only if Q is not on the curve.
+        address shared = mulAdd(0, e, qx, parity);
+        if (shared == address(0)) revert MalformedMetaAddress();
+        if (shared != pointAddress(witness[32:96])) revert InvalidSharedSecret();
     }
 
     /// @dev The address of the uncompressed point `xy` (64 bytes, x || y).

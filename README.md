@@ -309,8 +309,8 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
 | `StealthResolver` | 22,128 | 2,448 |
-| `Scheme1Verifier` | 1,651 | 22,925 |
-| `FluidkeyVerifier` | 5,785 | 18,791 |
+| `Scheme1Verifier` | 1,657 | 22,919 |
+| `FluidkeyVerifier` | 5,803 | 18,773 |
 | `FluidkeySigners` | 894 | 23,682 |
 
 Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
@@ -326,8 +326,8 @@ read cost.
 | `resolveStealthCallback`, unverified (wildcard name) | 49,278 + verifier |
 | `resolveStealthCallback`, verified (registered name) | 30,703 + verifier |
 | `resolve` registered name, `verifyStealthResolution` | 43,773 + verifier |
-| `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,122 |
-| `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,639 |
+| `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,130 |
+| `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,683 |
 | `FluidkeyVerifier.verify`, unverified mode, signed | 14,923 |
 | `resolve` text, forwarded to a `PermissionedResolver` | 43,907 |
 | `resolve` text on the `PermissionedResolver` directly (reference) | 6,426 |
