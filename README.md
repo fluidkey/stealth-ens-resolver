@@ -89,10 +89,11 @@ intended. A nested `resolve(name, resolve(...))` is refused (`UnsupportedResolve
 executes inner calldata.
 
 **Batched lookups.** A single address lookup goes from the client straight to the stealth gateway.
-In `resolve(name, multicall(...))` the lookups are batched through ENS's batch gateway, as the
-UniversalResolver batches, unless ENS's batch gateway list tells the client to batch locally
-(`x-batch-gateway:true`, as it does today). A remote batch gateway sees every response,
-`verificationData` included, and:
+In `resolve(name, multicall(...))` the lookups are batched through the gateways of ENS's batch
+gateway list, as the UniversalResolver batches. Today that list names ENS's remote batch gateway
+(`ccip-v3.ens.xyz`) first and `x-batch-gateway:true` second: a client that implements that marker
+batches locally, any other sends the whole batch to ENS's gateway. A remote batch gateway sees
+every response, `verificationData` included, and:
 
 - in unverified mode could replace the address, unless the verifier authenticates the response
   (FK1 checks the stealth gateway's signature; scheme 1 checks nothing);
