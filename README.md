@@ -164,7 +164,10 @@ contracts consuming stealth resolutions call `resolve(name, verifyStealthResolut
 the UniversalResolver (`UniversalResolverV2.resolve`, no CCIP-Read on this path), which routes to
 the name's current resolver. `StealthResolver` does not check that it is still that resolver: a
 record left here after a name moved elsewhere still verifies for a caller that addresses
-`StealthResolver` directly. The ENSIP allows this for deployments such as ENSv2, where the authority
+`StealthResolver` directly. So does one its parent wrote for an emancipated ENSv1 subname of a
+migrated wrapped name that has not migrated itself: ENSv2 resolves that subname through ENSv1,
+while `StealthResolver` finds no registration for it and treats it as a wildcard name of its
+parent. The ENSIP allows this for deployments such as ENSv2, where the authority
 over a name is reachable only by name.
 
 ### Setting up a name for verified resolution
