@@ -239,9 +239,9 @@ contract StealthResolver is
     ///      the gateway, verified if the name has a meta-address; any other coin type is forwarded
     ///      to the records resolver. `data()` serves the meta-address record only for listed coin
     ///      types. The ENSIP-19 default coin type may be listed: queries for it then go to the
-    ///      gateway too, while a chain that is not listed never falls back to it. `0x80000001` is
-    ///      Ethereum in ENSIP-11 form and is answered as 60, so it cannot be listed. Same authority
-    ///      as `setConfig`.
+    ///      gateway too, while a chain that is not listed never falls back to it. `0x80000001`,
+    ///      Ethereum in ENSIP-11 form, cannot be listed: chain 1 is 60, and a query for it is
+    ///      forwarded like any other unlisted coin type. Same authority as `setConfig`.
     /// @param name The DNS-encoded name.
     /// @param coinTypes ENSIP-11 EVM coin types, or the ENSIP-19 default.
     /// @param enabled Add (true) or remove (false).
@@ -460,11 +460,7 @@ contract StealthResolver is
                 abi.decode(data[4:], (bytes32, uint256, address, bytes));
             return abi.encode(
                 _verifyResolution(
-                    ctx.key,
-                    _checkNode(name, data),
-                    _chainCoinType(vCoinType),
-                    stealthAddress,
-                    verificationData
+                    ctx.key, _checkNode(name, data), vCoinType, stealthAddress, verificationData
                 )
             );
         }
@@ -472,17 +468,14 @@ contract StealthResolver is
             (, string memory key) = abi.decode(data[4:], (bytes32, string));
             (bool isStealthKey, uint256 keyCoinType) = _parseStealthKey(key);
             if (isStealthKey) {
-                return abi.encode(
-                    _record(ctx.key, _checkNode(name, data), _chainCoinType(keyCoinType))
-                );
+                return abi.encode(_record(ctx.key, _checkNode(name, data), keyCoinType));
             }
         }
         bool legacy = selector == IAddrResolver.addr.selector;
         bool isAddr = legacy || selector == IAddressResolver.addr.selector;
-        uint256 queried = isAddr && !legacy ? uint256(bytes32(data[36:68])) : COIN_TYPE_ETH;
-        uint256 coinType = _chainCoinType(queried);
+        uint256 coinType = isAddr && !legacy ? uint256(bytes32(data[36:68])) : COIN_TYPE_ETH;
         if (isAddr && _isStealth(ctx.key, coinType)) {
-            _stealthLookup(name, data, ctx.key, coinType, coinType != queried, legacy);
+            _stealthLookup(name, data, ctx.key, coinType, legacy);
         }
         address recordsResolver = c.recordsResolver;
         if (recordsResolver == address(0)) {
@@ -496,22 +489,18 @@ contract StealthResolver is
     }
 
     /// @dev ENSIP-30 Section 4, step 1: the `OffchainLookup` to the gateway of the authority `key`.
-    ///      An aliased query (`0x80000001`) reaches the gateway as the coin type answered, 60.
     function _stealthLookup(
         bytes calldata name,
         bytes calldata data,
         bytes32 key,
         uint256 coinType,
-        bool aliased,
         bool legacy
     ) internal view {
-        bytes32 node = _checkNode(name, data);
-        bytes memory query = data;
-        if (aliased) query = abi.encodeCall(IAddressResolver.addr, (node, coinType));
+        _checkNode(name, data);
         revert OffchainLookup(
             address(this),
             _configs[key].gatewayURLs,
-            abi.encodeCall(IExtendedResolver.resolve, (name, query)),
+            abi.encodeCall(IExtendedResolver.resolve, (name, data)),
             this.resolveStealthCallback.selector,
             abi.encode(name, coinType, legacy, _lookupBinding(key))
         );
@@ -589,12 +578,6 @@ contract StealthResolver is
     ///      item without checking the error marker would read an address it chose.
     function _isSafeBatchGatewayError(bytes4) internal pure override returns (bool) {
         return false;
-    }
-
-    /// @dev Ethereum's coin type for its ENSIP-11 alias `0x80000001`, otherwise `coinType`, so that
-    ///      chain 1 has one chain-list entry and one record.
-    function _chainCoinType(uint256 coinType) internal pure returns (uint256) {
-        return coinType == COIN_TYPE_DEFAULT | 1 ? COIN_TYPE_ETH : coinType;
     }
 
     /// @dev What a lookup is bound to: the authority `key` and the gateway URLs it was sent to.

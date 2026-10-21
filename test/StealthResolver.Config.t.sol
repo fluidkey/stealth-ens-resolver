@@ -244,7 +244,7 @@ contract StealthResolverConfigTest is StealthResolverFixture {
     }
 
     /// @dev The ENSIP-19 default may be listed; `0x80000001`, Ethereum in ENSIP-11 form, may not:
-    ///      it is answered as 60.
+    ///      chain 1 is 60.
     function test_setChains_defaultListedAliasRejected() public {
         setChain(alice, "alice.fkey.eth", 0x80000000, true);
         uint256[] memory coinTypes = new uint256[](1);

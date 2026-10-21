@@ -123,25 +123,17 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         assertEq(abi.decode(v, (bytes)), abi.encodePacked(address(0xBEEF)), "static");
     }
 
-    /// @dev `0x80000001` is Ethereum in ENSIP-11 form: answered as 60, and the gateway is asked
-    ///      for 60, so chain 1 has one stealth coin type and one record.
-    function test_ethereumAlias_answeredAs60() public {
+    /// @dev `0x80000001`, Ethereum in ENSIP-11 form, cannot be listed (chain 1 is 60) and is
+    ///      forwarded like any unlisted coin type: with no default record in the records resolver
+    ///      it answers unset, and its stealth key serves no record.
+    function test_ethereumAlias_forwardedUnlisted() public {
         setUpAliceVerified(COIN_ETH);
-        EIP3668.Params memory p = _lookupCoin("alice.fkey.eth", 0x80000001);
-        (, uint256 coinType,,) = abi.decode(p.extraData, (bytes, uint256, bool, bytes32));
-        assertEq(coinType, COIN_ETH);
-        assertEq(
-            p.callData,
-            abi.encodeCall(
-                IExtendedResolver.resolve,
-                (
-                    dns("alice.fkey.eth"),
-                    abi.encodeCall(IAddressResolver.addr, (aliceNode, COIN_ETH))
-                )
-            )
+        assertFalse(isStealthChain("alice.fkey.eth", 0x80000001));
+        bytes memory v = resolver.resolve(
+            dns("alice.fkey.eth"), abi.encodeCall(IAddressResolver.addr, (aliceNode, 0x80000001))
         );
-        assertTrue(isStealthChain("alice.fkey.eth", 0x80000001));
-        assertEq(_data(aliceNode, 0x80000001), META, "the record of 60");
+        assertEq(abi.decode(v, (bytes)), "", "unset");
+        assertEq(_data(aliceNode, 0x80000001), "", "no record under the alias key");
     }
 
     function test_ownGatewayWinsOverInherited() public {
