@@ -135,7 +135,10 @@ contract StealthResolver is
     event MetaAddressChanged(bytes32 indexed node, bytes name, bytes value);
 
     /// @notice All state of `node` was cleared (`clearRecords`). The event of ENS's
-    ///         `IVersionableResolver`.
+    ///         `IVersionableResolver`, counted per authority: a new authority for `node` (a
+    ///         registration, a reserved name registered, a wildcard name registered, a lapse to
+    ///         the parent) starts empty with no event and counts from zero again, so an indexer
+    ///         cannot key state by `(node, newVersion)` alone.
     event VersionChanged(bytes32 indexed node, uint64 newVersion);
 
     /// @notice `account` may not write this state of `name`.

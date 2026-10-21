@@ -85,6 +85,22 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
         assertEq(_record("alice.fkey.eth").length, 0);
     }
 
+    /// @dev `VersionChanged` counts per authority: a new registration starts its own count, so two
+    ///      holders of one name can emit the same `(node, newVersion)`.
+    function test_clearRecords_versionCountsPerRegistration() public {
+        setUpAliceVerified(COIN_ETH);
+        vm.expectEmit(address(resolver));
+        emit StealthResolver.VersionChanged(aliceNode, 1);
+        vm.prank(alice);
+        resolver.clearRecords(dns("alice.fkey.eth"));
+
+        _reregisterAlice(carol);
+        vm.expectEmit(address(resolver));
+        emit StealthResolver.VersionChanged(aliceNode, 1);
+        vm.prank(carol);
+        resolver.clearRecords(dns("alice.fkey.eth"));
+    }
+
     /// @dev Re-registering the parent drops everything written under its authority: config and
     ///      every wildcard username's record.
     function test_parentReregistration_dropsUsernames() public {
