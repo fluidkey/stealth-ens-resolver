@@ -103,8 +103,9 @@ every response, `verificationData` included, and:
 - can fail an item. A failed item comes back as error data, marked only by its length (4 more than
   a multiple of 32; empty if the failure had no data), so clients check that before decoding.
   `StealthResolver` wraps every batch-gateway failure, and neither it nor the verifiers put a word
-  the gateway chose into an error argument, so a failed item never reads as an address someone
-  chose.
+  the gateway chose into the arguments of their own errors. The wrap does carry the batch
+  gateway's bytes, but after its offset and length words, so no gateway word sits where a result
+  would decode and a failed item never reads as an address someone chose.
 
 ### Who may write
 
