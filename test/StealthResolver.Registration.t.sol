@@ -199,6 +199,54 @@ contract StealthResolverRegistrationTest is StealthResolverFixture {
         assertFalse(isStealthChain("vip.club.eth", COIN_ETH), "no reservation-era gateway");
     }
 
+    /// @dev A label reserved again after its reservation lapsed keeps its resource and status, so
+    ///      it reads what the previous reservation left, also from a writer that has since lost the
+    ///      role, until a registry-wide holder clears it.
+    function test_reservedName_reReservationKeepsStateUntilCleared() public {
+        address registrar = makeAddr("registrar");
+        address planter = makeAddr("planter");
+        UserRegistry clubRegistry = deployUserRegistry(
+            registrar,
+            RegistryRolesLib.ROLE_REGISTRAR | RegistryRolesLib.ROLE_SET_RESOLVER
+                | RegistryRolesLib.ROLE_SET_RESOLVER_ADMIN,
+            uint256(keccak256("club"))
+        );
+        ethRegistry.register(
+            "club",
+            makeAddr("club owner"),
+            clubRegistry,
+            address(resolver),
+            _ethTokenRoles(),
+            expiry
+        );
+        vm.prank(registrar);
+        clubRegistry.grantRootRoles(RegistryRolesLib.ROLE_SET_RESOLVER, planter);
+        uint64 reservation = uint64(block.timestamp + 1 days);
+        vm.prank(registrar);
+        clubRegistry.register(
+            "vip", address(0), IRegistry(address(0)), address(resolver), 0, reservation
+        );
+        setConfig(planter, "vip.club.eth", address(0), STEALTH_GW);
+        setChain(planter, "vip.club.eth", COIN_ETH, true);
+        setMeta(planter, "vip.club.eth", META);
+        vm.prank(registrar);
+        clubRegistry.revokeRootRoles(RegistryRolesLib.ROLE_SET_RESOLVER, planter);
+
+        vm.warp(reservation + 1);
+        vm.prank(registrar);
+        clubRegistry.register(
+            "vip", address(0), IRegistry(address(0)), address(resolver), 0, expiry
+        );
+        assertFalse(resolver.canSetConfig(dns("vip.club.eth"), planter), "planter lost the role");
+        assertEq(_record("vip.club.eth"), META, "previous reservation's record");
+        assertTrue(isStealthChain("vip.club.eth", COIN_ETH), "previous reservation's gateway");
+
+        vm.prank(registrar);
+        resolver.clearRecords(dns("vip.club.eth"));
+        assertEq(_record("vip.club.eth"), "", "cleared");
+        assertFalse(isStealthChain("vip.club.eth", COIN_ETH), "no gateway");
+    }
+
     /// @dev A transfer keeps the state, as ENS's resolvers keep a name's records: the seller's
     ///      config, chain list and records stay, wildcard names' included, until the buyer clears
     ///      them with `clearRecords`.

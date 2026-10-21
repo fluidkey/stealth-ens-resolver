@@ -148,7 +148,9 @@ records are therefore never read, and the new holder starts empty. A transfer ke
 and the state with it, as ENS's resolvers keep a name's records: the buyer drops what the seller
 left with one `clearRecords(name)`, as with `clearRecords(node)` on ENS's `PublicResolver`. A
 reserved name's registration starts empty, also after the reservation lapsed (ENSv2 keeps that
-resource; the state key includes the reserved status). An expired name that is not registered again resolves
+resource; the state key includes the reserved status). A label reserved again after its
+reservation lapsed keeps both, so it reads what the previous reservation left: `clearRecords` it.
+An expired name that is not registered again resolves
 as a wildcard name of its parent, and a record the parent wrote for it before it was registered is
 served again, as ENS falls back to the parent's resolver. A parent therefore clears a username's
 wildcard record before registering the username; it cannot while the username is registered.

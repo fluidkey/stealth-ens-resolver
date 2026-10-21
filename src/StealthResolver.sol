@@ -50,7 +50,8 @@ import {IStealthVerifier} from "./interfaces/IStealthVerifier.sol";
 ///      never read: ENSv2 renews the resource when an expired name is registered again, and what
 ///      was written while a name was reserved is not read once it is registered. A transfer keeps
 ///      the resource, and the state with it, as ENS's resolvers keep a name's records; the new
-///      holder clears it with `clearRecords`.
+///      holder clears it with `clearRecords`. So does a label reserved again after its reservation
+///      lapsed: it reads what the previous reservation left until it is cleared.
 ///
 ///      Per query for a DNS-encoded name N, with the config of N's authority (nothing is inherited
 ///      past a registered name, so an ancestor never governs a registered descendant):
