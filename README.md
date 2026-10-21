@@ -42,17 +42,17 @@ registered ancestor. Nothing is inherited past a registered name.
 | Address record (`addr`, `addr(coinType)`) for a coin type on the chain list, gateway URLs set | ERC-3668 lookup to the gateway. **Verified** if N has a meta-address: the verifier rederives the address and it must equal the gateway's. Otherwise **unverified**: the verifier decides. The zero address is an unset record. |
 | Address record for any other coin type, or no gateway URLs | Forwarded to the records resolver (the name's static address); unset if there is none. |
 | `data(node, "stealth-meta-address[<scheme>][<coinType>]")` | N's meta-address if the coin type is on the chain list, otherwise empty: the value the callback verifies against. |
-| Any other record | Forwarded to the records resolver, including offchain ones. |
+| Any other record | Forwarded to the records resolver, including offchain ones; its failures propagate. With no records resolver, a non-address profile reverts `UnsupportedResolverProfile`. |
 | `resolve(name, multicall(...))`, `resolve(name, multicallWithNodeCheck(node, ...))` | Answered as one batch (ERC-7996 `RESOLVE_MULTICALL`); each item resolved as above. The node-checked form requires the name's node in every item, as ENS's `Multicallable` does. |
 | `gatewayURLs(node)` | N's authority's URLs. Through `resolve()` only: called directly it reverts `ResolveOnly` (see Section 5 by name). |
-| `schemeId()` | This resolver's scheme, for any name, as the ENSIP requires of `IStealthResolver`'s functions through `resolve()`; also answered directly. |
+| `schemeId()` | This resolver's scheme, for any name, as the ENSIP requires of `IStealthResolver`'s functions through `resolve()`; also answered directly, as it is not name-scoped. |
 | `verifyStealthResolution(node, coinType, address, verificationData)` | Verified against N's record, located by name like every other query, wildcard names included. Through `resolve()` only, as above; no CCIP-Read is involved, so contracts can call it onchain, through the UniversalResolver (see Section 5 by name). |
 | `getResolver(name)` (`ICompositeResolver`) | The records resolver, so apps know where to edit other records. |
 
 **The record served is the record verified**, for every name, wildcard names included. Only the
 scheme's key in canonical form is the record; other spellings (`[060]`, `[0x3c]`) are ordinary data,
 forwarded. The stealth key written into the records resolver with standard tooling is not the record
-and is ignored.
+and is ignored; another scheme's key is an ordinary record of the records resolver.
 
 **Chain lists.** One meta-address serves every listed chain (the ENSIP's rationale allows storing the
 key material once and exposing it under each coin type enabled for the name). Only EVM coin types can
@@ -69,9 +69,11 @@ a name with listed chains.
 Removing a chain falls back to the static address, never to unverified resolution: a lookup in
 flight when the chain or the gateway is removed is rejected (`ChainNotStealth`). A lookup is also
 bound to the authority and gateway URLs it was sent to, as ENS's UniversalResolver sends each
-callback to the resolver it looked up. If they change before the callback (new URLs, `clearRecords`,
-or a lapse that makes the parent the authority), the answer is rejected (`StaleLookup`). The
-record, and with it the mode, is still read in the callback, as the ENSIP requires. For Fluidkey,
+callback to the resolver it looked up. If they change before the callback, the answer is rejected:
+`StaleLookup` for new URLs, `ChainNotStealth` when `clearRecords`, a lapse or a re-registration
+left the coin type unlisted under the authority found at callback time (`StaleLookup` if it is
+listed there). The record, and with it the mode, is still read in the callback, as the ENSIP
+requires. For Fluidkey,
 the list of `fkey.eth` covers every username: adding a chain is one transaction.
 
 Records are checked when written: empty (cleared), or a flag byte with reserved bits zero followed by
@@ -79,8 +81,8 @@ a non-empty meta-address. The scheme's verifier checks the meta-address itself w
 malformed one fails the resolution.
 
 Only `addr`, `addr(coinType)` and the two multicall forms (`multicall`, `multicallWithNodeCheck`,
-both split into single queries) take the gateway path. Other selectors, such as `hasAddr`, are
-forwarded, so a static address left in the records resolver for a listed chain is readable through
+both split into single queries) take the gateway path. Other selectors, such as `hasAddr` and
+`interfaceImplementer`, are forwarded, so a static address left in the records resolver for a listed chain is readable through
 them (it is public onchain anyway). Do not keep one there; static addresses for unlisted chains are
 intended. A nested `resolve(name, resolve(...))` is refused (`UnsupportedResolverProfile`), as ENS's
 `PermissionedResolver` refuses it, so it cannot reach that address through a records resolver that
@@ -114,6 +116,8 @@ A reserved name counts as registered, as ENSv2 treats it: it exists in the regis
 so it is its own authority, written by whoever may set its resolver there (registry-wide
 `ROLE_SET_RESOLVER` holders, since it has no token yet) and never by its parent's holder. Nothing
 written while it is reserved is read once it is registered: the registrant starts empty.
+Registry-wide `ROLE_SET_RESOLVER` holders write every name in their registry, as they may set every
+resolver in it.
 
 | Function | Name | Written by |
 |---|---|---|
@@ -169,8 +173,9 @@ over a name is reachable only by name.
 4. `setMetaAddress(name, value)`.
 5. Set the name's resolver in its ENSv2 registry to `StealthResolver`.
 
-A smart account can batch all five. For a name acquired by transfer, call `clearRecords(name)`
-first. For a wildcard username, the parent's holder calls `setMetaAddress` for the username's name;
+A smart account can batch all five. For a name acquired by transfer, revoke any other
+`ROLE_SET_RESOLVER` holder on its token (the registry keeps the seller's grants), then call
+`clearRecords(name)`. For a wildcard username, the parent's holder calls `setMetaAddress` for the username's name;
 the parent's records resolver can be an offchain one.
 
 ### Scheme 1
@@ -286,7 +291,8 @@ Both modes require a signature by an account that `FluidkeySigners` lists (EIP-7
 
 `FluidkeySigners` is owned by Fluidkey so signing keys rotate without redeploying. Its ownership
 can be transferred (in two steps) but not renounced, which would freeze the signer set, leaked keys
-included. In verified mode a signer can refuse a derivation but cannot make the verifier return a
+included. Every FK1 lookup, verified ones included, needs a current signer's signature, so
+Fluidkey's signing service is on the availability path of every FK1 name. In verified mode a signer can refuse a derivation but cannot make the verifier return a
 Safe the record does not derive. The scheme ID, FK1 (`0x464B31`, 4606769), is a constructor
 argument: the scheme's ERC declares it.
 
@@ -319,9 +325,10 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 | `FluidkeyVerifier` | 5,543 | 19,033 |
 | `FluidkeySigners` | 927 | 23,649 |
 
-Measured by `test/Gas.t.sol`, stored in `snapshots/Gas.json`, checked in CI. Reads are what an
-`eth_call` costs; verified-mode numbers use a mock verifier, and the verifier's own cost is listed
-separately.
+Measured by `test/Gas.t.sol` (the verifier rows in the verifier test files), stored in
+`snapshots/Gas.json`, checked in CI. Reads are measured in one warm run after setup, so a cold
+`eth_call` costs somewhat more; verified-mode numbers use a mock verifier, and the verifier's own
+cost is listed separately.
 Every `resolve()` looks the name up in the registry to find its authority, which is most of the
 read cost.
 

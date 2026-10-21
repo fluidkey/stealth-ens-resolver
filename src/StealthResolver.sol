@@ -38,7 +38,8 @@ import {IStealthVerifier} from "./interfaces/IStealthVerifier.sol";
 ///      `ResolverCaller`, as ENS's mirror resolvers do.
 ///
 ///      Queried only through ENSIP-10 `resolve()`; no profile is answered directly, the ENSIP-30
-///      Section 5 functions included (a node alone cannot be walked to the name's authority).
+///      Section 5 functions included (a node alone cannot be walked to the name's authority),
+///      except `schemeId()`, which is not name-scoped.
 ///
 ///      Authority. All state is written under the ENSv2 rule for setting a name's resolver
 ///      (`ROLE_SET_RESOLVER` on the name's token, not expired), applied to the nearest registered
@@ -631,8 +632,8 @@ contract StealthResolver is
         return _verify(node, coinType, record, verificationData, stealthAddress);
     }
 
-    /// @dev Verified mode: the verifier rederives from the record (well formed, checked when
-    ///      written); the result must equal `claimed`.
+    /// @dev Verified mode: the verifier rederives from the record (flag byte and length checked
+    ///      when written, the rest by the verifier); the result must equal `claimed`.
     function _verify(
         bytes32 node,
         uint256 coinType,
