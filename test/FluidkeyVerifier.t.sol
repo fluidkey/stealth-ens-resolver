@@ -10,7 +10,7 @@ import {FluidkeyVerifier} from "../src/verifiers/FluidkeyVerifier.sol";
 import {FluidkeyVectors} from "./utils/FluidkeyVectors.sol";
 
 /// @dev FluidkeyVerifier against derivations by Fluidkey's stealth-account-kit, every rejection,
-///      the supported chains, and the signatures of both modes.
+///      and the signatures of both modes.
 contract FluidkeyVerifierTest is Test {
     uint256 internal constant N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
     uint256 internal constant P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F;
@@ -24,8 +24,8 @@ contract FluidkeyVerifierTest is Test {
     address internal resolver = makeAddr("resolver");
     bytes32 internal node = keccak256("bob.fkey.eth");
 
-    /// @dev Ethereum, Base, OP Mainnet, Arbitrum One, Polygon PoS, Gnosis, BNB Smart Chain and the
-    ///      ENSIP-19 default.
+    /// @dev The chains Fluidkey's gateway signs for (README): Ethereum, Base, OP Mainnet, Arbitrum
+    ///      One, Polygon PoS, Gnosis, BNB Smart Chain and the ENSIP-19 default.
     uint256[8] internal chains = [
         uint256(60),
         0x80002105,
@@ -51,13 +51,6 @@ contract FluidkeyVerifierTest is Test {
         assembly {
             h := mload(add(meta, 65)) // bytes 33..64
         }
-    }
-
-    function _listed(uint256 coinType) internal view returns (bool) {
-        for (uint256 i; i < chains.length; ++i) {
-            if (chains[i] == coinType) return true;
-        }
-        return false;
     }
 
     // Signatures, built independently of the verifier.
@@ -179,38 +172,25 @@ contract FluidkeyVerifierTest is Test {
         new FluidkeyVerifier(FK1, IFluidkeySigners(eoa));
     }
 
-    // Chains.
+    // Chains: no list in the verifier; the signature, bound to the coin type, is the gate.
 
-    function test_isSupportedChain() public view {
-        for (uint256 i; i < chains.length; ++i) {
-            assertTrue(verifier.isSupportedChain(chains[i]), vm.toString(chains[i]));
-        }
-        assertFalse(verifier.isSupportedChain(0x80000001), "chain 1 under ENSIP-19 encoding");
-        assertFalse(verifier.isSupportedChain(0), "Bitcoin");
-        assertFalse(verifier.isSupportedChain(0x80aa36a7), "Sepolia");
-        assertFalse(verifier.isSupportedChain(0x80000144), "zkSync Era");
-    }
-
-    /// @dev Both modes refuse any other coin type, even with a signature for it.
-    function testFuzz_unsupportedChain(uint256 coinType) public {
-        vm.assume(!_listed(coinType));
+    /// @dev Any coin type verifies when a signer signed for it, in both modes.
+    function testFuzz_anyCoinTypeWhenSigned(uint256 coinType) public {
         FluidkeyVectors.Vector memory v = vectors[4];
         bytes memory vd = bytes.concat(
             v.verificationData,
             _signVerified(SIGNER_KEY, resolver, node, coinType, v.stealthAddress)
         );
-        bytes memory err =
-            abi.encodeWithSelector(FluidkeyVerifier.UnsupportedChain.selector, coinType);
         vm.startPrank(resolver);
-        vm.expectRevert(err);
-        verifier.verify(node, coinType, v.metaAddress, vd, v.stealthAddress);
+        assertEq(
+            verifier.verify(node, coinType, v.metaAddress, vd, v.stealthAddress), v.stealthAddress
+        );
 
         uint64 expires = uint64(block.timestamp + 300);
         vd = abi.encode(
             expires, _sign(SIGNER_KEY, resolver, node, coinType, v.stealthAddress, expires)
         );
-        vm.expectRevert(err);
-        verifier.verify(node, coinType, "", vd, v.stealthAddress);
+        assertEq(verifier.verify(node, coinType, "", vd, v.stealthAddress), v.stealthAddress);
         vm.stopPrank();
     }
 

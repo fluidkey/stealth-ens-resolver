@@ -193,12 +193,13 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
         );
     }
 
-    /// @dev A chain FK1 does not support fails the lookup even when the name lists it.
-    function test_unsupportedChainRejected() public {
+    /// @dev A chain Fluidkey's gateway does not sign for fails the lookup even when the name lists
+    ///      it: the signature binds the coin type, so there is no chain list in the verifier.
+    function test_unsignedChainRejected() public {
         uint256 zkSyncEra = 0x80000000 | 324;
         setChain(alice, "alice.fkey.eth", zkSyncEra, true);
         gwClaimed = v.stealthAddress;
-        gwVerificationData = _signedDerivation(aliceNode);
+        gwVerificationData = _signedDerivation(aliceNode); // signed for coin type 60
         (bool ok, bytes memory result) = ccipCall(
             address(resolver),
             abi.encodeCall(
@@ -210,9 +211,7 @@ contract FluidkeyVerifierResolverTest is StealthResolverFixture {
             )
         );
         assertFalse(ok);
-        assertEq(
-            result, abi.encodeWithSelector(FluidkeyVerifier.UnsupportedChain.selector, zkSyncEra)
-        );
+        assertEq(result, abi.encodeWithSelector(FluidkeyVerifier.UnknownSigner.selector));
     }
 
     /// @dev bob.fkey.eth has no record: the signed response is accepted.
