@@ -561,6 +561,15 @@ contract StealthResolver is
         registered = status != uint256(IPermissionedRegistry.Status.AVAILABLE);
     }
 
+    /// @dev Every batch-gateway failure is wrapped as `UnsafeBatchGatewayResponse(bytes)`, which
+    ///      reads as no address. ENS's default passes failures starting with `HttpError` or
+    ///      `Error(string)` through unwrapped, checking the selector only, so a batch gateway could
+    ///      put bytes of its choosing into a failed multicall item, and a client that decodes the
+    ///      item without checking the error marker would read an address it chose.
+    function _isSafeBatchGatewayError(bytes4) internal pure override returns (bool) {
+        return false;
+    }
+
     /// @dev What a lookup is bound to: the authority `key` and the gateway URLs it was sent to.
     function _lookupBinding(bytes32 key) internal view returns (bytes32) {
         return keccak256(abi.encode(key, _configs[key].gatewayURLs));

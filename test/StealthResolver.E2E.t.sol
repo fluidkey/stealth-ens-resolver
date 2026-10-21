@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.25;
 
+import {CCIPBatcher} from "@ens/contracts/ccipRead/CCIPBatcher.sol";
+import {EIP3668} from "@ens/contracts/ccipRead/EIP3668.sol";
 import {IMulticallable} from "@ens/contracts/resolvers/IMulticallable.sol";
 import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol";
 import {IContentHashResolver} from "@ens/contracts/resolvers/profiles/IContentHashResolver.sol";
@@ -111,6 +113,35 @@ contract StealthResolverE2ETest is StealthResolverFixture {
         bytes[] memory results = abi.decode(abi.decode(v, (bytes)), (bytes[]));
         assertEq(abi.decode(results[0], (string)), "ipfs://bob");
         assertEq(abi.decode(results[1], (address)), gwClaimed);
+    }
+
+    /// @dev A batch gateway may fail an item, but never choose what it reads as: its bytes are
+    ///      wrapped even when they start with a selector ENS's default passes through, so a client
+    ///      that skips the error marker reads no address.
+    function test_multicall_batchGatewayFailureIsWrapped() public {
+        setUpAliceVerified(COIN_ETH);
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = abi.encodeCall(IAddrResolver.addr, (aliceNode));
+        bytes memory call =
+            abi.encodeCall(resolver.resolve, (dns("alice.fkey.eth"), _multicall(calls)));
+        address attacker = makeAddr("attacker");
+        bytes[2] memory payloads = [
+            abi.encodePacked(bytes12(0), attacker, bytes4(0)),
+            abi.encodePacked(bytes4(0x08c379a0), bytes8(0), attacker) // Error(string)
+        ];
+        for (uint256 i; i < payloads.length; ++i) {
+            EIP3668.Params memory p = expectLookup(address(resolver), call);
+            bool[] memory failures = new bool[](1);
+            failures[0] = true;
+            bytes[] memory responses = new bytes[](1);
+            responses[0] = payloads[i];
+            (bool ok, bytes memory v) = callback(p, abi.encode(failures, responses));
+            assertTrue(ok);
+            bytes memory item = abi.decode(abi.decode(v, (bytes)), (bytes[]))[0];
+            assertEq(bytes4(item), CCIPBatcher.UnsafeBatchGatewayResponse.selector);
+            assertEq(item.length % 32, 4, "marked as an error");
+            assertEq(address(uint160(uint256(bytes32(item)))), address(0), "reads as no address");
+        }
     }
 
     function test_multicall_failingItemCarriesItsError() public {

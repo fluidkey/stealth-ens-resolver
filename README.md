@@ -85,7 +85,12 @@ nothing in unverified mode also trusts the batch gateway; one that authenticates
 as a signature by the stealth gateway, does not. In verified mode it cannot change whose address it
 is, but it can answer with a derivation from an ephemeral key of its own, which the recipient finds
 only if it learns that key. Scheme 1 trusts the batch gateway for this; FK1 requires the stealth
-gateway's signature in both modes.
+gateway's signature in both modes. A batch gateway can also fail an item; a failed item comes
+back as error data, marked by a length of 4 more than a multiple of 32. `StealthResolver` wraps
+every batch-gateway failure as `UnsafeBatchGatewayResponse(bytes)` (ENS's default lets ones
+starting with `HttpError` or `Error(string)` through), so a client that decodes such an item as an
+address without checking the marker reads no address rather than one the batch gateway picked.
+Clients should still check the marker.
 
 ### Who may write
 
@@ -282,7 +287,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
-| `StealthResolver` | 21,708 | 2,868 |
+| `StealthResolver` | 21,608 | 2,968 |
 | `Scheme1Verifier` | 1,651 | 22,925 |
 | `FluidkeyVerifier` | 6,071 | 18,505 |
 | `FluidkeySigners` | 894 | 23,682 |
