@@ -363,7 +363,7 @@ contract StealthResolver is
     /// @dev ENSIP-10; ENSIP-30 Sections 1 and 4. `multicall(bytes[])` and
     ///      `multicallWithNodeCheck(bytes32, bytes[])` are answered as a batch; the latter checks
     ///      that its node is the name's and that every item carries it, as ENS's `Multicallable`
-    ///      does.
+    ///      does, except that a zero node is refused rather than skipping the check.
     function resolve(bytes calldata name, bytes calldata data)
         external
         view

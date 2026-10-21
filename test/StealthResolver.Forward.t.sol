@@ -229,6 +229,20 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         );
     }
 
+    /// @dev A zero node is refused like any other node that is not the name's, where ENS's
+    ///      `Multicallable` skips the check for it.
+    function test_multicallWithNodeCheck_zeroNodeRefused() public {
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = abi.encodeCall(IAddrResolver.addr, (bytes32(0)));
+        vm.expectRevert(
+            abi.encodeWithSelector(StealthResolver.NodeMismatch.selector, bytes32(0), bobNode)
+        );
+        resolver.resolve(
+            dns("bob.fkey.eth"),
+            abi.encodeCall(IMulticallable.multicallWithNodeCheck, (bytes32(0), calls))
+        );
+    }
+
     /// @dev Selectors other than the address profiles and the multicall forms are forwarded, so a
     ///      static address in the records resolver stays readable through them.
     function test_otherSelectorsReachStaticAddress() public {
