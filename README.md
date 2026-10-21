@@ -86,23 +86,21 @@ intended. A nested `resolve(name, resolve(...))` is refused (`UnsupportedResolve
 `PermissionedResolver` refuses it, so it cannot reach that address through a records resolver that
 executes inner calldata.
 
-**Batched lookups.** A single address lookup goes from the client to the stealth gateway. In
-`resolve(name, multicall(...))` every lookup is batched through ENS's batch gateway, as the
-UniversalResolver does for batched resolutions, unless the client batches locally
-(`x-batch-gateway:true`). That gateway then sees the stealth gateway's response, including
-`verificationData`, and in unverified mode it could replace the address: a verifier that checks
-nothing in unverified mode also trusts the batch gateway; one that authenticates the response, such
-as a signature by the stealth gateway, does not. In verified mode it cannot change whose address it
-is, but it can answer with a derivation from an ephemeral key of its own, which the recipient finds
-only if it learns that key. Scheme 1 trusts the batch gateway for this; FK1 requires the stealth
-gateway's signature in both modes. A batch gateway can also fail an item; a failed item comes
-back as error data, marked by a length of 4 more than a multiple of 32. `StealthResolver` wraps
-every batch-gateway failure as `UnsafeBatchGatewayResponse(bytes)` (ENS's default lets ones
-starting with `HttpError` or `Error(string)` through), and its own errors and the verifiers'
-carry no word a gateway chose (`StealthAddressMismatch()` has no arguments; FK1 reports a
-malformed signature as `UnknownSigner(address(0))`). A client that decodes a failed item as an
-address without checking the marker therefore reads no address rather than one a gateway picked.
-Clients should still check the marker.
+**Batched lookups.** A single address lookup goes from the client straight to the stealth gateway.
+In `resolve(name, multicall(...))` the lookups are batched through ENS's batch gateway, as the
+UniversalResolver batches, unless ENS's batch gateway list tells the client to batch locally
+(`x-batch-gateway:true`, as it does today). A remote batch gateway sees every response,
+`verificationData` included, and:
+
+- in unverified mode could replace the address, unless the verifier authenticates the response
+  (FK1 checks the stealth gateway's signature; scheme 1 checks nothing);
+- in verified mode cannot change whose address it is, but could answer from an ephemeral key of
+  its own, so the recipient never finds the payment (FK1's signature rules this out; scheme 1
+  trusts the batch gateway here);
+- can fail an item. A failed item comes back as error data, marked only by its length (4 more than
+  a multiple of 32), so clients check that before decoding. `StealthResolver` wraps every
+  batch-gateway failure and keeps gateway-supplied bytes out of its errors, so a failed item never
+  reads as an address someone chose.
 
 ### Who may write
 
@@ -192,7 +190,8 @@ choosing its own `e`. Two `ecrecover` calls, no curve library: `LibEcrecover` ho
 construction, the one Chainlink's VRF verifier uses in production, and its tests check it against
 Chainlink's code and against direct key derivation. Scheme 1's `verificationData` is therefore 96
 bytes, `e || S.x || S.y` (the ENSIP leaves the format to each scheme); a gateway computes `S`
-anyway.
+anyway. Because it carries `e`, anyone who saw it can turn one leaked stealth private key into the
+spending key, for FK1 as well: stealth keys need the same care as the spending key.
 
 The meta-address must be two compressed keys whose x-coordinates are below the group order `n`;
 anything else, including the one in about 2^128 valid keys at or above `n` that `ecrecover` cannot
