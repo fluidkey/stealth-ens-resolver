@@ -57,6 +57,17 @@ registry entry governs that name anyway, as the ENSIP's trust model says.
 A name registered again after it expired starts empty. A transferred name keeps its state, as ENS
 records do, until the new holder calls `clearRecords(name)`.
 
+Whether a lookup that goes to the gateway is verified depends only on whether a meta-address is
+stored for the name; who may store one depends only on whether the name is registered. Under one
+parent every combination coexists:
+
+| Name | Registered | Meta-address | Result |
+|---|---|---|---|
+| `alice.wallet.eth` | yes, Alice holds the token | yes, by Alice | Verified, with Alice's own records resolver, gateway URLs and chain list |
+| `bob.wallet.eth` | no, exists only in the gateway | no | Unverified, with `wallet.eth`'s config; the verifier's own checks apply |
+| `carol.wallet.eth` | no | yes, by `wallet.eth`'s holder | Verified, with the parent as the trusted writer of the record |
+| `dave.wallet.eth` | yes, Dave holds the token | no | Unverified on chains Dave lists with his own gateway URLs; otherwise forwarded to his records resolver (static addresses, or unset) |
+
 ## Setting up a name
 
 Every step is per name: `StealthResolver` itself is deployed once per scheme, and nothing in it is
