@@ -12,7 +12,9 @@ import {ERC6538Bridge} from "../src/ERC6538Bridge.sol";
 ///
 ///   UNIVERSAL_RESOLVER=<a> forge script script/DeployERC6538Bridge.s.sol --fork-url $RPC_URL
 ///
-/// UNIVERSAL_RESOLVER is ENS's UniversalResolver on Ethereum mainnet.
+/// UNIVERSAL_RESOLVER is ENS's UniversalResolver proxy on Ethereum mainnet
+/// (0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe), the entry point ENS keeps and upgrades in place,
+/// not one of its implementations: the bridge stores it immutably, and its address depends on it.
 contract DeployERC6538Bridge is Script {
     /// @notice Salt for the ERC6538Bridge deployment.
     bytes32 public constant SALT = keccak256("ENSIP-30 ERC6538Bridge");

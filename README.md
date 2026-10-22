@@ -161,6 +161,14 @@ if the lookup fails or is answered offchain, it returns empty. It takes the DNS-
 is not a drop-in for the ERC-6538 registry, and it never falls back to the registry for a name
 without a record.
 
+- **Coin type 60 only.** A name that does not list Ethereum has no record here, including a name
+  that lists only the ENSIP-19 default coin type.
+- **A malformed name reverts** (`DNSDecodingFailed`) rather than reading as empty: the name is the
+  caller's, not part of the lookup.
+- **Trust.** The bridge is stateless and has no owner, but it reads through ENS's UniversalResolver
+  proxy, which ENS upgrades in place. Its answers depend on ENS's proxy admin, as every lookup
+  through the UniversalResolver does. Deploy it against the proxy, not an implementation.
+
 ## Contracts
 
 | Contract | Role |

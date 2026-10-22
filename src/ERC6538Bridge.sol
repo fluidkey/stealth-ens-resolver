@@ -14,8 +14,11 @@ import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 ///         stealth addresses themselves (ENSIP-30 Section 3).
 /// @dev Stateless, no owner. The record is read through ENS's UniversalResolver, so the name's
 ///      resolver is found per ENSIP-10, wildcard names included, whatever resolver serves it.
-///      Coin type 60 only: ENS lives on Ethereum mainnet, and an onchain caller there pays on
-///      mainnet; a name that does not enable 60 has no record here.
+///      On Ethereum mainnet that is ENS's UniversalResolver proxy, which ENS upgrades in place:
+///      every answer depends on ENS's proxy admin, as every lookup through the UniversalResolver
+///      does. Coin type 60 only: ENS lives on Ethereum mainnet, and an onchain caller there pays
+///      on mainnet; a name that does not enable 60 has no record here, including a name that
+///      lists only the ENSIP-19 default coin type.
 ///
 ///      Returns the meta-address only when the name permits client-side derivation: the record's
 ///      flag byte is exactly 0x01 (bit 0 set, reserved bits zero; ENSIP-30 Sections 1 and 2).
@@ -23,6 +26,8 @@ import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 ///      for an unregistered account: no resolver, a resolver that answers offchain (an onchain
 ///      caller cannot follow `OffchainLookup`), a malformed answer. For scheme 1 the meta-address
 ///      must also be 66 bytes, two compressed keys; other schemes' encodings are not checked.
+///      A malformed `name` is the caller's fault, not a failed lookup: it reverts
+///      `DNSDecodingFailed` before anything is read.
 ///
 ///      The name is the DNS-encoded name, so the selector differs from ERC-6538's
 ///      `stealthMetaAddressOf(address,uint256)`: this is not a drop-in for the registry.
@@ -35,7 +40,8 @@ contract ERC6538Bridge {
     /// @notice The UniversalResolver must be a contract.
     error InvalidUniversalResolver(address universalResolver);
 
-    /// @param universalResolver ENS's UniversalResolver on Ethereum mainnet.
+    /// @param universalResolver ENS's UniversalResolver proxy on Ethereum mainnet, upgraded in
+    ///        place by ENS.
     constructor(IUniversalResolver universalResolver) {
         if (address(universalResolver).code.length == 0) {
             revert InvalidUniversalResolver(address(universalResolver));
@@ -46,7 +52,7 @@ contract ERC6538Bridge {
     /// @notice The stealth meta-address of `name` for `schemeId`, without the flag byte, or empty.
     /// @dev ENSIP-30 Sections 1 to 3: the record `stealth-meta-address[<schemeId>][60]` of `name`,
     ///      returned only if it permits client-side derivation. ERC-6538 shape, keyed by name.
-    /// @param name The DNS-encoded ENS name.
+    /// @param name The DNS-encoded ENS name; malformed, it reverts `DNSDecodingFailed`.
     /// @param schemeId The ERC-5564 scheme ID.
     /// @return The scheme's meta-address encoding (66 bytes for scheme 1), or empty.
     function stealthMetaAddressOf(bytes calldata name, uint256 schemeId)

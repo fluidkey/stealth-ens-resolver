@@ -4,6 +4,7 @@ pragma solidity 0.8.25;
 import {IExtendedResolver} from "@ens/contracts/resolvers/profiles/IExtendedResolver.sol";
 import {IUniversalResolver} from "@ens/contracts/universalResolver/IUniversalResolver.sol";
 import {BytesUtils} from "@ens/contracts/utils/BytesUtils.sol";
+import {NameCoder} from "@ens/contracts/utils/NameCoder.sol";
 
 import {ERC165} from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 import {IRegistry} from "~src/registry/interfaces/IRegistry.sol";
@@ -110,6 +111,16 @@ contract ERC6538BridgeTest is StealthResolverFixture {
     /// @dev No resolver anywhere up the name: empty, not a revert.
     function test_unknownName_empty() public view {
         assertEq(_of("nobody.eth"), "");
+    }
+
+    /// @dev A malformed name is the caller's fault, not a failed lookup: it reverts before
+    ///      anything is read. Empty, a label longer than the name, no terminator.
+    function test_malformedName_reverts() public {
+        bytes[3] memory names = [bytes(hex""), bytes(hex"05abcd"), bytes(hex"03abcdef")];
+        for (uint256 i; i < names.length; ++i) {
+            vm.expectRevert(abi.encodeWithSelector(NameCoder.DNSDecodingFailed.selector, names[i]));
+            bridge.stealthMetaAddressOf(names[i], 1);
+        }
     }
 
     /// @dev A resolver that answers offchain: an onchain caller cannot follow it.
