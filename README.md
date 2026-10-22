@@ -20,15 +20,16 @@ names, `PublicResolverV2` for names migrated from ENSv1, an offchain resolver, o
 resolver. `StealthResolver` is the name's resolver in the ENSv2 registry and forwards those queries
 through ENS's own `ResolverCaller`, as ENS's mirror resolvers do.
 
-```
-ENSv2 registry ── resolver ──▶ StealthResolver (immutable, one per scheme)
-                                 │   meta-addresses; per registered name: records resolver, gateway URLs, chain list
-  address on a listed chain ─────┼──▶ OffchainLookup → gateway → callback
-                                 │       verified:   against the stored meta-address
-                                 │       unverified: the scheme's verifier decides
-  stealth record ────────────────┼──▶ answered from storage, for listed chains
-  everything else ───────────────┴──▶ forwarded unchanged to the records resolver
-  (incl. addresses on other chains)
+```mermaid
+flowchart TB
+    Q["resolve(name, data)"] --> S["StealthResolver"]
+    S -->|"address on a listed chain"| G["stealth gateway"]
+    S -->|"stealth record"| ST["own storage"]
+    S -->|"everything else"| P["records resolver"]
+    G --> CB{"meta-address<br/>stored?"}
+    CB -->|"yes"| V["verified:<br/>rederived, must match"]
+    CB -->|"no"| U["unverified:<br/>verifier decides"]
+    classDef default fill:none,stroke:#888,stroke-width:1px
 ```
 
 ### Resolution rules
