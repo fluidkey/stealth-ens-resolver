@@ -2,9 +2,11 @@
 pragma solidity 0.8.25;
 
 import {Deploy} from "../script/Deploy.s.sol";
+import {DeployERC6538Bridge} from "../script/DeployERC6538Bridge.s.sol";
 import {DeployFluidkeyVerifier} from "../script/DeployFluidkeyVerifier.s.sol";
 import {DeployScheme1Verifier} from "../script/DeployScheme1Verifier.s.sol";
 
+import {ERC6538Bridge} from "../src/ERC6538Bridge.sol";
 import {StealthResolver} from "../src/StealthResolver.sol";
 import {FluidkeySigners} from "../src/verifiers/FluidkeySigners.sol";
 import {FluidkeyVerifier} from "../src/verifiers/FluidkeyVerifier.sol";
@@ -48,5 +50,15 @@ contract DeployTest is StealthResolverFixture {
         assertEq(address(deployed.ROOT_REGISTRY()), address(rootRegistry));
         assertEq(address(deployed.VERIFIER()), address(verifier));
         assertEq(deployed.schemeId(), 1);
+    }
+
+    /// @dev At the predicted address for the UniversalResolver; a second run deploys nothing.
+    function test_deployERC6538Bridge_atPredictedAddress() public {
+        vm.setEnv("UNIVERSAL_RESOLVER", vm.toString(address(universalResolver)));
+        DeployERC6538Bridge script = new DeployERC6538Bridge();
+        ERC6538Bridge deployed = script.run();
+        assertEq(address(deployed), script.predict(universalResolver));
+        assertEq(address(deployed.UNIVERSAL_RESOLVER()), address(universalResolver));
+        assertEq(address(script.run()), address(deployed));
     }
 }

@@ -151,6 +151,16 @@ FK1:
 - **Detection.** FK1 records keep the client-side derivation flag clear: Fluidkey finds payments by
   regenerating its own ephemeral keys and cannot detect payments a sender derived.
 
+## Reading a meta-address onchain
+
+`ERC6538Bridge.stealthMetaAddressOf(name, schemeId)` returns a name's meta-address in the shape of
+the ERC-6538 registry, for contracts and clients that derive stealth addresses themselves. It reads
+the record for coin type 60 through ENS's UniversalResolver, wildcard names included and whatever
+resolver serves it, and returns it only if the record permits client-side derivation. Otherwise, or
+if the lookup fails or is answered offchain, it returns empty. It takes the DNS-encoded name, so it
+is not a drop-in for the ERC-6538 registry, and it never falls back to the registry for a name
+without a record.
+
 ## Contracts
 
 | Contract | Role |
@@ -162,6 +172,7 @@ FK1:
 | `verifiers/FluidkeyVerifier` | Fluidkey stealth Safe, FK1 |
 | `verifiers/FluidkeySigners` | Fluidkey gateway signers for FK1, owned by Fluidkey |
 | `verifiers/LibEcrecover` | secp256k1 `a·G + b·Q` on `ecrecover`, shared by the verifiers |
+| `ERC6538Bridge` | A name's meta-address in ERC-6538's shape, read through the UniversalResolver |
 
 ENS code is used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCoder` and `ENSIP19`
 from ens-contracts; `LibResolution`, `RegistryRolesLib` and the registry interfaces from namechain.
@@ -172,6 +183,7 @@ from ens-contracts; `LibResolution`, `RegistryRolesLib` and the registry interfa
 | `Scheme1Verifier` | 1,657 | 22,919 |
 | `FluidkeyVerifier` | 5,543 | 19,033 |
 | `FluidkeySigners` | 927 | 23,649 |
+| `ERC6538Bridge` | 2,602 | 21,974 |
 
 Gas per path is in `snapshots/Gas.json`, measured by `test/Gas.t.sol` and checked in CI.
 
@@ -188,9 +200,9 @@ forge test
 ```
 
 The tests run on namechain's own ENSv1 and ENSv2 fixtures, including resolution through
-UniversalResolverV2. Two fork tests are pinned to blocks and need archive RPCs: one against ENS's
+UniversalResolverV2. Three fork tests are pinned to blocks and need archive RPCs: one against ENS's
 ENSv2 deployment on Sepolia, one checking `FluidkeyVerifier`'s Safe constants against Ethereum
-mainnet.
+mainnet, and one reading records through `ERC6538Bridge` and ENS's mainnet UniversalResolver.
 
 ```bash
 SEPOLIA_RPC_URL=<rpc> MAINNET_RPC_URL=<rpc> forge test --match-path "test/fork/*"
@@ -234,6 +246,10 @@ SIGNERS_OWNER=<a> SCHEME_ID=4606769 forge script script/DeployFluidkeyVerifier.s
 
 ```bash
 ROOT_REGISTRY=<a> VERIFIER=<a> BATCH_GATEWAY_PROVIDER=<a> forge script script/Deploy.s.sol --fork-url $RPC_URL
+```
+
+```bash
+UNIVERSAL_RESOLVER=<a> forge script script/DeployERC6538Bridge.s.sol --fork-url $RPC_URL
 ```
 
 There is one `StealthResolver` per verifier. Deploy `FluidkeyVerifier` only once the scheme's ERC

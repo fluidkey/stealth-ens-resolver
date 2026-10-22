@@ -6,6 +6,7 @@ import {IAddrResolver} from "@ens/contracts/resolvers/profiles/IAddrResolver.sol
 import {IExtendedResolver} from "@ens/contracts/resolvers/profiles/IExtendedResolver.sol";
 import {ITextResolver} from "@ens/contracts/resolvers/profiles/ITextResolver.sol";
 
+import {ERC6538Bridge} from "../src/ERC6538Bridge.sol";
 import {IStealthResolver} from "../src/interfaces/IStealthResolver.sol";
 import {StealthResolverFixture} from "./utils/StealthResolverFixture.sol";
 
@@ -121,6 +122,18 @@ contract GasTest is StealthResolverFixture {
                         )
                     )
                 )
+            )
+        );
+    }
+
+    function test_gas_erc6538Bridge() public {
+        setUpAliceVerified(COIN_ETH);
+        ERC6538Bridge bridge = new ERC6538Bridge(universalResolver);
+        assertTrue(
+            _measure(
+                "ERC6538Bridge_stealthMetaAddressOf_registeredName",
+                address(bridge),
+                abi.encodeCall(bridge.stealthMetaAddressOf, (dns("alice.fkey.eth"), 1))
             )
         );
     }
