@@ -1,24 +1,22 @@
-# stealth-resolver
+# Stealth ENS Resolver
 
-Reference contracts for the ENSIP on stealth address resolution
-([ensdomains/ensips#88](https://github.com/ensdomains/ensips/pull/88)): an ENS resolver that resolves
-a name to a fresh ERC-5564 stealth address on every lookup and, for names that publish a stealth
-meta-address, verifies the gateway's address onchain before resolution completes.
+> [!WARNING]
+> Work in progress, not audited, not deployed.
 
-The ENSIP is the specification. Where this code and the ENSIP disagree, the ENSIP wins and the
-disagreement is raised against the ENSIP.
+Reference contracts for ENSIP-30, stealth address resolution
+([ensdomains/ensips#88](https://github.com/ensdomains/ensips/pull/88)). A name that uses
+`StealthResolver` resolves to a fresh ERC-5564 stealth address on every lookup. If the name
+publishes a stealth meta-address, the address the gateway returns is verified onchain against it
+before resolution completes.
 
-> Status: work in progress, not audited, not deployed. Built for ENSv2.
+## How it works
 
-## Design
-
-`StealthResolver` stores one stealth meta-address per name (the ENSIP's record value) and a small
-config per registered name: records resolver, gateway URLs and a **chain list**, the EVM coin types on
-which the name is stealth. Every other record stays in an unmodified ENS resolver of the
-owner's choice, its **records resolver**: the per-account `PermissionedResolver` ENSv2 gives new
-names, `PublicResolverV2` for names migrated from ENSv1, an offchain resolver, or any other ENS
-resolver. `StealthResolver` is the name's resolver in the ENSv2 registry and forwards those queries
-through ENS's own `ResolverCaller`, as ENS's mirror resolvers do.
+`StealthResolver` is set as the name's resolver in the ENSv2 registry. It is immutable and verifies
+exactly one scheme: there is one deployment per scheme, each with that scheme's verifier fixed at
+deployment. For each name it stores a stealth meta-address and a small config: a records
+resolver, gateway URLs and a chain list. All other records stay in the records resolver, an
+unmodified ENS resolver chosen by the owner (for example the `PermissionedResolver` ENSv2 gives new
+names), and queries for them are forwarded there.
 
 ```mermaid
 flowchart TB
@@ -32,286 +30,115 @@ flowchart TB
     classDef default fill:none,stroke:#888,stroke-width:1px
 ```
 
-### Resolution rules
+- **Address on a listed chain** (coin type on the chain list, gateway URLs set). The client is sent
+  to the stealth gateway through ERC-3668 (CCIP-Read). If the name has a meta-address, the callback
+  rederives the address and rejects one that does not match (**verified**). Otherwise the scheme's
+  verifier decides what to accept (**unverified**).
+- **Address on any other chain, or no gateway URLs.** Forwarded, so a name can be stealth on Base and
+  keep a static address on Ethereum.
+- **Stealth record**, `data(node, "stealth-meta-address[<scheme>][<coinType>]")`. Answered from
+  storage for listed chains: the same value the callback verifies against.
+- **Everything else.** Forwarded to the records resolver.
 
-`StealthResolver` is queried through ENSIP-10 `resolve()` only. A name N resolves with the config
-and records of its **authority** (see "Who may write"): N itself if registered, otherwise its nearest
-registered ancestor. Nothing is inherited past a registered name.
+Queries arrive through ENSIP-10 `resolve(name, data)`, as the UniversalResolver sends them, batched
+`multicall`s included. A wildcard name, such as a username that exists only in its parent's
+gateway, uses the config and records of its nearest registered ancestor; a registered name uses only
+its own. The ENSIP's Section 5 functions are therefore answered through `resolve()` only. Contracts
+verify a resolution onchain with `UniversalResolverV2.resolve(name, verifyStealthResolution(...))`.
 
-| Query | Result |
-|---|---|
-| Address record (`addr`, `addr(coinType)`) for a coin type on the chain list, gateway URLs set | ERC-3668 lookup to the gateway. **Verified** if N has a meta-address: the verifier rederives the address and it must equal the gateway's. Otherwise **unverified**: the verifier decides. The zero address is an unset record. |
-| Address record for any other coin type, or no gateway URLs | Forwarded to the records resolver (the name's static address); unset if there is none. |
-| `data(node, "stealth-meta-address[<scheme>][<coinType>]")` | N's meta-address if the coin type is on the chain list, otherwise empty: the value the callback verifies against. |
-| Any other record | Forwarded to the records resolver, including offchain ones; its failures propagate. With no records resolver, a non-address profile reverts `UnsupportedResolverProfile`. |
-| `resolve(name, multicall(...))`, `resolve(name, multicallWithNodeCheck(node, ...))` | Answered as one batch (ERC-7996 `RESOLVE_MULTICALL`); each item resolved as above. The node-checked form requires the name's node in every item, as ENS's `Multicallable` does; a zero node is refused, not taken as "no check". |
-| `gatewayURLs(node)` | N's authority's URLs. Through `resolve()` only: called directly it reverts `ResolveOnly` (see Section 5 by name). |
-| `schemeId()` | This resolver's scheme, for any name, as the ENSIP requires of `IStealthResolver`'s functions through `resolve()`; also answered directly, as it is not name-scoped. |
-| `verifyStealthResolution(node, coinType, address, verificationData)` | Verified against N's record, located by name like every other query, wildcard names included. Through `resolve()` only, as above; no CCIP-Read is involved, so contracts can call it onchain, through the UniversalResolver (see Section 5 by name). |
-| `getResolver(name)` (`ICompositeResolver`) | The records resolver, so apps know where to edit other records. |
+## Who controls a name
 
-**The record served is the record verified**, for every name, wildcard names included. Only the
-scheme's key in canonical form is the record; other spellings (`[060]`, `[0x3c]`) are ordinary data,
-forwarded. The stealth key written into the records resolver with standard tooling is not the record
-and is ignored; another scheme's key is an ordinary record of the records resolver.
+State is written by whoever may set the name's resolver in the ENSv2 registry (`ROLE_SET_RESOLVER`),
+applied to the nearest registered name at or above it. A parent such as `wallet.eth` therefore writes
+the meta-addresses of its wildcard usernames; once a username is registered, only its holder (and
+any registry-wide `ROLE_SET_RESOLVER` holder) writes it. A parent that can still change a name's
+registry entry governs that name anyway, as the ENSIP's trust model says.
 
-**Chain lists.** One meta-address serves every listed chain (the ENSIP's rationale allows storing
-the key material once and exposing it under each coin type enabled for the name). Only EVM coin
-types can be listed, since the verifier answers with an EVM address. A name is stealth on listed
-chains and keeps its static address on all others, so stealth on Base and static on Ethereum is one
-list entry. The ENSIP-19 default coin type (`0x80000000`) can be listed too, as an opt-in: a query
-for the default then goes to the gateway, so the recipient must detect payments on any EVM chain,
-and a chain that is not listed still never falls back to it. This departs from the ENSIP draft,
-which allows only ENSIP-11 coin types, and is raised against it. `0x80000001`, Ethereum in ENSIP-11
-form, cannot be listed (chain 1 is 60); a query for it is forwarded like any unlisted coin type. A
-records resolver that holds an ENSIP-19 default address answers every EVM coin type without its own
-record: `0x80000001`, unlisted chains, and the default itself unless it is listed. Keep no default
-record on a name with listed chains. The record is served for every listed chain whether or not
-gateway URLs are set, so a name that allows only client-side derivation (the ENSIP's flag bit 0)
-lists its chains with no gateway URLs; one name cannot use the gateway on some chains and
-client-side derivation only on others. Removing a chain falls back to the static address, never to
-unverified resolution: a lookup in flight when the chain or the gateway is removed is rejected
-(`ChainNotStealth`). A lookup is also bound to the authority and gateway URLs it was sent to, as
-ENS's UniversalResolver sends each callback to the resolver it looked up. If they change before the
-callback, the answer is rejected: `StaleLookup` for new URLs, `ChainNotStealth` when `clearRecords`,
-a lapse or a re-registration left the coin type unlisted under the authority found at callback time
-(`StaleLookup` if it is listed there). The record, and with it the mode, is still read in the
-callback, as the ENSIP requires. For Fluidkey, the list of `fkey.eth` covers every username: adding
-a chain is one transaction.
+A name registered again after it expired starts empty. A transferred name keeps its state, as ENS
+records do, until the new holder calls `clearRecords(name)`.
 
-Records are checked when written: empty (cleared), or a flag byte with reserved bits zero followed by
-a non-empty meta-address. The scheme's verifier checks the meta-address itself when verifying, and a
-malformed one fails the resolution.
+## Setting up a name
 
-Only `addr`, `addr(coinType)` and the two multicall forms (`multicall`, `multicallWithNodeCheck`,
-both split into single queries) take the gateway path. Other selectors, such as `hasAddr` and
-`interfaceImplementer`, are forwarded, so a static address left in the records resolver for a listed
-chain is readable through them (it is public onchain anyway). Do not keep one there; static
-addresses for unlisted chains are intended. A nested `resolve(name, resolve(...))` is refused
-(`UnsupportedResolverProfile`), as ENS's `PermissionedResolver` refuses it, so it cannot reach that
-address through a records resolver that executes inner calldata.
+Every step is per name: `StealthResolver` itself is deployed once per scheme, and nothing in it is
+configured per resolver. A registered name's config and chain list also cover the wildcard names
+below it. If `wallet.eth` sets them, `user.wallet.eth` needs no setup of its own as long as it is
+not registered: it uses `wallet.eth`'s config and chain list, and `wallet.eth` writes its
+meta-address. Once `user.wallet.eth` is registered it inherits nothing, and its holder sets up all
+five steps for it. A smart account can batch all five.
 
-**Batched lookups.** A single address lookup goes from the client straight to the stealth gateway.
-In `resolve(name, multicall(...))` the lookups are batched through the gateways of ENS's batch
-gateway list, as the UniversalResolver batches. Today that list names ENS's remote batch gateway
-(`ccip-v3.ens.xyz`) first and `x-batch-gateway:true` second: a client that implements that marker
-batches locally, any other sends the whole batch to ENS's gateway. A remote batch gateway sees
-every response, `verificationData` included, and:
+1. Deploy or reuse a records resolver for the name's other records. One resolver, such as an
+   account's `PermissionedResolver`, can hold the records of many names.
+2. `setConfig(name, recordsResolver, gatewayURLs)`, per registered name. A wildcard name uses its
+   nearest registered ancestor's config.
+3. `setChains(name, coinTypes, true)` with the chains the recipient scans, per registered name.
+   A wildcard name uses its nearest registered ancestor's chain list.
+4. `setMetaAddress(name, value)` for verified resolution, per name, wildcard names included (the
+   parent writes those). Without a record, resolution is unverified.
+5. Set the name's resolver in the ENSv2 registry to `StealthResolver`, per registered name. Wildcard
+   names reach it through their parent's resolver, so a parent sets it once for all of them.
 
-- in unverified mode could replace the address, unless the verifier authenticates the response
-  (FK1 checks the stealth gateway's signature; scheme 1 checks nothing);
-- in verified mode cannot change whose address it is, but could answer from an ephemeral key of
-  its own, so the recipient never finds the payment (FK1's signature rules this out; scheme 1
-  trusts the batch gateway here);
-- can fail an item. A failed item comes back as error data, marked only by its length (4 more than
-  a multiple of 32; empty if the failure had no data), so clients check that before decoding.
-  `StealthResolver` wraps every batch-gateway failure, and neither it nor the verifiers put a word
-  the gateway chose into the arguments of their own errors. The wrap does carry the batch
-  gateway's bytes, but after its offset and length words, so no gateway word sits where a result
-  would decode and a failed item never reads as an address someone chose.
+Things to know:
 
-### Who may write
+- **Acquired by transfer:** revoke any other `ROLE_SET_RESOLVER` holder on the token (the registry
+  keeps the seller's grants), then call `clearRecords(name)`.
+- **No default or static address for listed chains in the records resolver.** An ENSIP-19 default
+  address answers every EVM coin type without its own record, `0x80000001` included. A static
+  address for a listed chain stays readable through forwarded selectors such as `hasAddr` and
+  `interfaceImplementer`.
+- **The ENSIP-19 default coin type** (`0x80000000`) can be listed as an opt-in, for wallets that ask
+  only for the default. The answer names no chain, so the payer may use it on a chain where the
+  scheme's address is not the recipient's.
+- **Client-side derivation only:** list the chains and set no gateway URLs. One name cannot combine
+  the gateway on some chains with client-side derivation only on others.
+- **Lapses:** a registered username that expires and is not registered again resolves as a wildcard
+  name of its parent, including any record the parent wrote for it before it was registered. A label
+  reserved again after its reservation lapsed reads what the previous reservation wrote. In both
+  cases, clear the old state.
 
-All state is written under the ENSv2 rule for setting a name's resolver: `ROLE_SET_RESOLVER` on the
-name's token, name not expired, the same check as `PermissionedRegistry.setResolver`. It applies to
-the **authority** of a name, the nearest registered name at or above it. Top-level names are never an
-authority: their state would reach every name below them. A name in a registry that is not an ENSv2
-`PermissionedRegistry` counts as unregistered and takes its nearest registered ancestor as authority.
-A reserved name counts as registered, as ENSv2 treats it: it exists in the registry in its own right,
-so it is its own authority, written by whoever may set its resolver there (registry-wide
-`ROLE_SET_RESOLVER` holders, since it has no token yet) and never by its parent's holder. Nothing
-written while it is reserved is read once it is registered: the registrant starts empty.
-Registry-wide `ROLE_SET_RESOLVER` holders write every name in their registry, as they may set every
-resolver in it.
+## Batched lookups
 
-| Function | Name | Written by |
-|---|---|---|
-| `setConfig(name, recordsResolver, gatewayURLs)` | registered names only | the name's own authority |
-| `setChains(name, coinTypes, enabled)` | registered names only | the name's own authority |
-| `setMetaAddress(name, value)` | any name below a registered one | its authority: the name itself if registered, otherwise its nearest registered ancestor |
-| `clearRecords(name)` | registered names only | the name's own authority |
+In `resolve(name, multicall(...))` the lookups go through the batch gateways on ENS's list: today
+ENS's remote gateway `ccip-v3.ens.xyz` first, then `x-batch-gateway:true`. A client that implements
+that marker batches locally; any other sends the whole batch, gateway responses included, to ENS's
+gateway. A remote batch gateway can replace the address in unverified mode unless the verifier
+authenticates the response, for example by a signature of the stealth gateway; `Scheme1Verifier`
+does not. In scheme 1 verified mode it can also answer from an ephemeral key of its own, so that the
+recipient never finds the payment. A failed item comes back as error data, marked only by its length
+(4 more than a multiple of 32, or empty), so clients check that before decoding an item.
 
-A parent such as `fkey.eth` therefore writes the meta-addresses of its wildcard usernames, which exist only
-in its gateway. Once a username is registered, only its holder writes its record, and a record the
-parent wrote before is no longer read. `clearRecords(name)` drops all of a registered name's state at
-once: its config, its chain list and every record written under it, its wildcard names' included. A
-records resolver must be a contract other than `StealthResolver`.
+## Schemes
 
-**Trust.** A name is governed by its authority: records, gateway, chain list and, in verified mode,
-the meta-address it is verified against. This is the ENSIP's trust model for wildcard names. A
-registered name is its own authority and reads nothing from its ancestors, so a parent's config never
-reaches it: no gateway URLs means no gateway, and its static address records are forwarded as set.
-To use a parent's gateway, a registered name sets the same URLs itself. Its owner should be the only
-holder of `ROLE_SET_RESOLVER` on it. A parent that can still change the name's registry entry (swap
-its subregistry, unregister it, grant roles in it) governs it anyway, as the ENSIP's trust model
-says.
+| Verifier | Scheme | Meta-address | `verificationData` |
+|---|---|---|---|
+| `Scheme1Verifier` | ERC-5564 scheme 1, as the ScopeLift stealth-address SDK derives it | `P_spend ‖ P_view`, 66 bytes | `e ‖ S.x ‖ S.y`, 96 bytes |
+| `FluidkeyVerifier` | Fluidkey stealth Safe, FK1 (`0x464B31`), as stealth-account-kit 1.1.1 derives it: a counterfactual 1-of-1 Safe 1.3.0 | `P_spend ‖ configHash`, 65 bytes | verified: `e ‖ S.x ‖ S.y ‖ signature`, 161 bytes; unverified: `abi.encode(uint64 expires, bytes signature)` |
 
-**Re-registration and transfer.** State is keyed by the authority's ENSv2 resource, which the
-registry renews when an expired name is registered again, to anyone. A previous holder's config and
-records are therefore never read, and the new holder starts empty. A transfer keeps the resource,
-and the state with it, as ENS's resolvers keep a name's records: the buyer drops what the seller
-left with one `clearRecords(name)`, as with `clearRecords(node)` on ENS's `PublicResolver`. A
-reserved name's registration starts empty, also after the reservation lapsed (ENSv2 keeps that
-resource; the state key includes the reserved status). A label reserved again after its reservation
-lapsed keeps both, so it reads what the previous reservation left: `clearRecords` it. An expired
-name that is not registered again resolves as a wildcard name of its parent, and a record the parent
-wrote for it before it was registered is served again, as ENS falls back to the parent's resolver. A
-parent therefore clears a username's wildcard record before registering the username; it cannot
-while the username is registered.
+Both verifiers check the derivation with two `ecrecover` calls (`LibEcrecover`, tested against the
+construction Chainlink's VRF verifier uses), with no curve library. `verificationData` contains the
+ephemeral private key: combined with one leaked stealth private key it gives the spending key, so
+stealth keys need the same care as the spending key. With no meta-address, `Scheme1Verifier`
+returns the gateway's address unchecked.
 
-**Section 5 by name.** `gatewayURLs(node)` and `verifyStealthResolution(node, ...)` are answered
-only through ENSIP-10 `resolve(name, data)`, which the UniversalResolver wraps every profile call
-in. A node alone cannot be walked through the registry to the name's authority, so a direct call
-reverts `ResolveOnly`; the interface is still reported through ERC-165. Out-of-flow verifiers and
-contracts consuming stealth resolutions call `resolve(name, verifyStealthResolution(...))` through
-the UniversalResolver (`UniversalResolverV2.resolve`, no CCIP-Read on this path), which routes to
-the name's current resolver. `StealthResolver` does not check that it is still that resolver: a
-record left here after a name moved elsewhere still verifies for a caller that addresses
-`StealthResolver` directly. So does one its parent wrote for an emancipated ENSv1 subname of a
-migrated wrapped name that has not migrated itself: ENSv2 resolves that subname through ENSv1,
-while `StealthResolver` finds no registration for it and treats it as a wildcard name of its
-parent. The ENSIP allows this for deployments such as ENSv2, where the authority
-over a name is reachable only by name.
+FK1:
 
-### Setting up a name for verified resolution
-
-1. Deploy (or reuse) a records resolver for the name's other records, for example a
-   `PermissionedResolver` through ENS's `VerifiableFactory`.
-2. `setConfig(name, recordsResolver, gatewayURLs)` with the gateway's URLs (for a Fluidkey user,
-   Fluidkey's); empty URLs mean no gateway.
-3. `setChains(name, coinTypes, true)` with the chains the recipient scans.
-4. `setMetaAddress(name, value)`.
-5. Set the name's resolver in its ENSv2 registry to `StealthResolver`.
-
-A smart account can batch all five. For a name acquired by transfer, revoke any other
-`ROLE_SET_RESOLVER` holder on its token (the registry keeps the seller's grants), then call
-`clearRecords(name)`. For a wildcard username, the parent's holder calls `setMetaAddress` for the
-username's name; the parent's records resolver can be an offchain one.
-
-### Scheme 1
-
-`Scheme1Verifier` verifies ERC-5564 scheme 1 (secp256k1 with view tags) as the ScopeLift
-stealth-address SDK derives it: for meta-address `(P_spend, P_view)` and ephemeral private key `e`,
-
-```
-S   = e·P_view                         shared secret point (ECDH)
-s_h = keccak256(compressed S) mod n    33 bytes hashed: 0x02 or 0x03 prefix, then x
-stealth address = address(P_spend + s_h·G)
-```
-
-ERC-5564 leaves the hashed encoding open and implementations differ; the compressed point is what
-the SDK, and wallets built on it, use.
-
-The EVM has no secp256k1 arithmetic except `ecrecover`, which can compute `a·G + b·Q` but returns
-only the result's address. That covers the last step. Hashing `S` needs its coordinates, so the
-gateway sends `S` and the verifier checks that its address is that of `e·P_view`. Passing a wrong
-`S` takes about 2^80 work (the gateway also picks `e`) and gains nothing a gateway cannot get by
-choosing its own `e`. Two `ecrecover` calls, no curve library: `LibEcrecover` holds the
-construction, the one Chainlink's VRF verifier uses in production, and its tests check it against
-Chainlink's code and against direct key derivation. Scheme 1's `verificationData` is therefore 96
-bytes, `e || S.x || S.y` (the ENSIP leaves the format to each scheme); a gateway computes `S`
-anyway. Because it carries `e`, anyone who saw it can turn one leaked stealth private key into the
-spending key, for FK1 as well: stealth keys need the same care as the spending key.
-
-The meta-address must be two compressed keys whose x-coordinates are below the group order `n`;
-anything else, including the one in about 2^128 valid keys at or above `n` that `ecrecover` cannot
-take, is malformed and fails the resolution. With no meta-address the verifier returns the
-gateway's address unchecked: unverified mode trusts the gateway and, for batched lookups, the batch
-gateway. A verifier must be as immutable as the resolver, since it decides the derived address:
-`Scheme1Verifier` has no state and no owner.
-
-### Fluidkey stealth Safe (FK1)
-
-`FluidkeyVerifier` verifies Fluidkey's scheme as fluidkey-stealth-account-kit 1.1.1 derives it. It
-is not scheme 1: the key exchange uses the spending key, the stealth key is a multiple of it, and
-the stealth address is a counterfactual 1-of-1 Safe owned by that key:
-
-```
-S     = e·P_spend                       shared secret point (ECDH with the spending key)
-h     = keccak256(S.x || S.y) mod n     uncompressed point, no prefix
-owner = address(h·P_spend)
-stealth address = CREATE2 address of a Safe 1.3.0 proxy owned by `owner`, threshold 1
-```
-
-The Safe uses the default Safe 1.3.0 deployments (factory, L1 singleton, compatibility fallback
-handler, MultiSend, SafeModuleSetup), so a stealth Safe has the same address on every chain. It is
-the recipient's only where those contracts are deployed: elsewhere the address can be out of reach,
-or deployable without its setup by whoever knows `owner`. The verifier has no chain list: both
-modes carry a Fluidkey signature bound to the coin type, so the chains answered for are those
-Fluidkey's gateway signs for, a policy that changes without redeploying. Today these are the chains
-below, which all have the Safe contracts; a name that lists another chain fails lookups on it
-(`UnknownSigner`).
-
-| Chain | Coin type |
-|---|---|
-| Ethereum | `60` |
-| Base | `0x80002105` |
-| OP Mainnet | `0x8000000a` |
-| Arbitrum One | `0x8000a4b1` |
-| Polygon PoS | `0x80000089` |
-| Gnosis | `0x80000064` |
-| BNB Smart Chain | `0x80000038` |
-| ENSIP-19 default (any EVM chain) | `0x80000000` |
-
-The gateway signs for the default too, for authorities that list it (see "Chain lists"), so that
-wallets asking only for the default get a stealth Safe. Its answer names no chain, so a payer can
-use it on any EVM chain, including one where the Safe is not the recipient's: out of reach on
-zkSync-family chains, and on a chain without the Safe contracts deployable without its setup by
-anyone who saw the lookup. Fluidkey derives the same Safe for every chain, so on the seven chains
-above the payment is found. An authority lists the default only if it accepts that risk for payers
-whose wallets ask for it.
-
-The Safe's setup `to` and `data` follow the account's auto-earn setting and affect who can move
-funds, so they are fixed by the scheme and selected by the record, never by the gateway (ENSIP-30
-Section 5). The meta-address is 65 bytes, the compressed spending key followed by a `configHash`: 0
-means auto-earn off and an empty setup; any other value means a setup that enables Fluidkey's Earn
-module and installs that `configHash`, rebuilt from a fixed template that reproduces the setup data
-of Fluidkey's production Safes. The `configHash` is part of the Safe's address, so the record
-carries the one new Safes are installed with, not the value the module stores for an existing Safe,
-which can change after deployment. Changing auto-earn settings is a record write; a new Earn module
-or Safe version is a new scheme, FK2, with its own verifier and resolver.
-
-Any `configHash` is accepted: the name's authority, which writes the record, chooses it. A
-`configHash` stands for a list of (chain, token, vault) entries registered in the Earn module by its
-owner, a Fluidkey multisig, and lets the relayers the owner appoints deposit the Safe's listed
-tokens into the listed vaults. The module's owner and relayers are therefore trusted for auto-earn
-Safes, and an authority writes only a `configHash` whose list it has checked. On BNB Smart Chain the
-Earn module is not deployed yet, so an auto-earn Safe there enables a module address with no code,
-and whoever deploys code at that address would control those Safes. This relies on that address
-being deployable only by Fluidkey's multisig.
-
-Both modes require a signature by an account that `FluidkeySigners` lists (EIP-712, domain
-`FluidkeyVerifier`, version `1`), bound to the resolver, name and chain. It is 65 bytes,
-`r || s || v` with `v` 27 or 28 and low `s`; `v` as 0 or 1 and the 64-byte compact form fail as
-`UnknownSigner`. The two modes:
-
-- Verified mode: `verificationData` is `e || S.x || S.y || signature`, 161 bytes. The derivation is
-  checked as for scheme 1, with two `ecrecover` calls, and the signature is over
-  `VerifiedStealthResolution(address resolver, bytes32 node, uint256 coinType, address
-  stealthAddress)` for the derived Safe. Any `e` with its point passes the curve checks, so without
-  the signature a batch gateway could answer from an ephemeral key of its own: the Safe would still
-  be the recipient's, but Fluidkey, which finds payments by regenerating its own ephemeral keys,
-  would not find it. The signature does not expire: the record fixes the Safe for each `e`, so a
-  replayed response answers the same Safe again, and the payers it is replayed to share one address.
-- Unverified mode (no record): `verificationData` is `abi.encode(uint64 expires, bytes signature)`,
-  over `StealthResolution(address resolver, bytes32 node, uint256 coinType, address stealthAddress,
-  uint64 expires)`. That stops a batch gateway from substituting the address; it authenticates
-  Fluidkey and is not verification under the ENSIP. `expires` may be at most 10 minutes
-  (`MAX_VALIDITY`) after the block's timestamp: a relay that kept a response can serve it until
-  then, also after the name changes hands. The gateway signs well inside the limit, such as 5
-  minutes, to allow for clock skew and lagging RPCs.
-
-`FluidkeySigners` is owned by Fluidkey so signing keys rotate without redeploying. Its ownership can
-be transferred (in two steps) but not renounced, which would freeze the signer set, leaked keys
-included. Every FK1 lookup, verified ones included, needs a current signer's signature, so
-Fluidkey's signing service is on the availability path of every FK1 name. In verified mode a signer
-can refuse a derivation but cannot make the verifier return a Safe the record does not derive. The
-scheme ID, FK1 (`0x464B31`, 4606769), is a constructor argument: the scheme's ERC declares it.
-
-Fluidkey's gateway answers with the Safe address and, if the name has a record (read onchain as the
-callback reads it), `e || S.x || S.y` and the signature; otherwise the signed expiry. Records
-written for FK1 keep the client-side derivation flag clear: Fluidkey finds payments by regenerating
-its own ephemeral keys and cannot detect ones a sender derived.
+- **Signed in both modes.** Every response needs an EIP-712 signature by a signer listed in
+  `FluidkeySigners`, which Fluidkey owns. The signature is 65 bytes, with `v` 27 or 28 and a low `s`.
+  Fluidkey's signing service is therefore on the availability path of every FK1 name. In verified
+  mode a signer can refuse a derivation but cannot redirect it. A signed unverified response is
+  valid for at most 10 minutes.
+- **Chains.** The contract has no chain list: a name gets answers on the chains Fluidkey's gateway
+  signs for. Today these are Ethereum, Base, OP Mainnet, Arbitrum One, Polygon PoS, Gnosis and BNB
+  Smart Chain, plus the ENSIP-19 default for names that list it. A default answer can be paid on any
+  EVM chain, including one where the Safe is not the recipient's: on zkSync-family chains it is out
+  of reach, and on a chain without the Safe contracts anyone who saw the lookup can deploy it without
+  its setup.
+- **Auto-earn.** `configHash` 0 means auto-earn off. Any other value makes the Safe enable Fluidkey's
+  Earn module with that config, which lets the relayers appointed by the module's owner, a Fluidkey
+  multisig, deposit the Safe's listed tokens into the listed vaults. Those parties are then trusted,
+  and the record's writer chooses the `configHash`. The Earn module is not deployed on BNB Smart
+  Chain yet; this relies on its address being deployable only by Fluidkey's multisig.
+- **Detection.** FK1 records keep the client-side derivation flag clear: Fluidkey finds payments by
+  regenerating its own ephemeral keys and cannot detect payments a sender derived.
 
 ## Contracts
 
@@ -320,15 +147,13 @@ its own ephemeral keys and cannot detect ones a sender derived.
 | `StealthResolver` | The verifying resolver |
 | `interfaces/IStealthResolver` | ENSIP Section 5, verbatim |
 | `interfaces/IStealthVerifier` | Scheme-specific verification, one verifier per scheme |
-| `verifiers/Scheme1Verifier` | ERC-5564 scheme 1 (see Scheme 1) |
-| `verifiers/FluidkeyVerifier` | Fluidkey stealth Safe, FK1 (see Fluidkey stealth Safe) |
+| `verifiers/Scheme1Verifier` | ERC-5564 scheme 1 |
+| `verifiers/FluidkeyVerifier` | Fluidkey stealth Safe, FK1 |
 | `verifiers/FluidkeySigners` | Fluidkey gateway signers for FK1, owned by Fluidkey |
 | `verifiers/LibEcrecover` | secp256k1 `a·G + b·Q` on `ecrecover`, shared by the verifiers |
 
-ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCoder`, `ENSIP19`
-(ens-contracts); `LibResolution`, `RegistryRolesLib` and the registry interfaces (namechain).
-
-## Size and gas
+ENS code is used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCoder` and `ENSIP19`
+from ens-contracts; `LibResolution`, `RegistryRolesLib` and the registry interfaces from namechain.
 
 | Contract | Runtime bytes | Margin to 24,576 |
 |---|---|---|
@@ -337,28 +162,7 @@ ENS code used unchanged: `ResolverCaller`, `CCIPReader`, `CCIPBatcher`, `NameCod
 | `FluidkeyVerifier` | 5,543 | 19,033 |
 | `FluidkeySigners` | 927 | 23,649 |
 
-Measured by `test/Gas.t.sol` (the verifier rows in the verifier test files), stored in
-`snapshots/Gas.json`, checked in CI. Reads are measured in one warm run after setup, so a cold
-`eth_call` costs somewhat more; verified-mode numbers use a mock verifier, and the verifier's own
-cost is listed separately.
-Every `resolve()` looks the name up in the registry to find its authority, which is most of the
-read cost.
-
-| Path | Gas |
-|---|---|
-| `resolve` wildcard name, address, `OffchainLookup` revert | 44,578 |
-| `resolve` registered name, address, `OffchainLookup` revert | 25,007 |
-| `resolveStealthCallback`, unverified (wildcard name) | 49,267 + verifier |
-| `resolveStealthCallback`, verified (registered name) | 30,722 + verifier |
-| `resolve` registered name, `verifyStealthResolution` | 27,376 + verifier |
-| `Scheme1Verifier.verify`, verified mode (the "+ verifier" for scheme 1) | 16,130 |
-| `FluidkeyVerifier.verify`, verified mode, auto-earn Safe, signed | 27,504 |
-| `FluidkeyVerifier.verify`, unverified mode, signed | 14,740 |
-| `resolve` text, forwarded to a `PermissionedResolver` | 43,808 |
-| `resolve` text on the `PermissionedResolver` directly (reference) | 6,426 |
-| `setConfig`, records resolver and one URL (transaction) | 143,403 |
-| `setChains`, one chain (transaction) | 91,462 |
-| `setMetaAddress`, 67-byte scheme-1 record (transaction) | 158,933 |
+Gas per path is in `snapshots/Gas.json`, measured by `test/Gas.t.sol` and checked in CI.
 
 ## Build and test
 
@@ -372,90 +176,57 @@ forge test
 ./script/check-ensip-sync.sh
 ```
 
-Tests run on namechain's own ENSv1 and ENSv2 fixtures, including resolution through
-UniversalResolverV2. Two fork tests are pinned to blocks, so their RPCs must serve historical
-state: one against ENS's ENSv2 deployment on Sepolia when `SEPOLIA_RPC_URL` is set, one checking
-`FluidkeyVerifier`'s Safe constants against Ethereum mainnet (the live factory deploys the Safe at
-the predicted address) when `MAINNET_RPC_URL` is set:
+The tests run on namechain's own ENSv1 and ENSv2 fixtures, including resolution through
+UniversalResolverV2. Two fork tests are pinned to blocks and need archive RPCs: one against ENS's
+ENSv2 deployment on Sepolia, one checking `FluidkeyVerifier`'s Safe constants against Ethereum
+mainnet.
 
 ```bash
 SEPOLIA_RPC_URL=<rpc> MAINNET_RPC_URL=<rpc> forge test --match-path "test/fork/*"
 ```
 
-The scheme 1 test vectors in `test/utils/Scheme1Vectors.sol` are derivations by the ScopeLift SDK,
-each also rederived from the curve operations by the generator. To regenerate them:
-
-```bash
-npm install --prefix <dir> --ignore-scripts @scopelift/stealth-address-sdk@1.0.0-beta.5
-node script/vectors/scheme1.mjs <dir> > test/utils/Scheme1Vectors.sol && forge fmt
-```
-
-The FK1 vectors in `test/utils/FluidkeyVectors.sol` come from Fluidkey's stealth-account-kit the
-same way, for three Safe setups (auto-earn off, the kit's auto-earn v1.1 `configHash`, another one):
-
-```bash
-npm install --prefix <dir> --ignore-scripts @fluidkey/stealth-account-kit@1.1.1
-node script/vectors/fluidkey.mjs <dir> > test/utils/FluidkeyVectors.sol && forge fmt
-```
-
-`test/reference/ChainlinkVRF.sol` is Chainlink's `VRF.sol`, vendored unchanged at a pinned commit as
-the reference `LibEcrecover` is tested against; it is never imported by `src/` and is excluded from
-formatting.
-
-Running a subset of tests rewrites `snapshots/` without the gas file; run the full suite before
-committing, or restore it with `git checkout snapshots/`.
-
-`check-ensip-sync.sh` checks that `src/interfaces/IStealthResolver.sol` contains the ENSIP's Section 5
-interface verbatim, against the pinned ENSIP commit (override with `ENSIP_REF`, or point `ENSIP_FILE`
-at a local draft). `verify-canonical-build.sh` checks that this repo's dependency setup compiles ENS's
-`PublicResolverV2` byte-for-byte as namechain does. Both run in CI.
+- `check-ensip-sync.sh` checks that `IStealthResolver` matches the pinned ENSIP's Section 5
+  verbatim (override with `ENSIP_REF`, or point `ENSIP_FILE` at a local draft).
+- `verify-canonical-build.sh` checks that this repo compiles ENS's `PublicResolverV2` byte for byte
+  as namechain does.
+- The test vectors come from the reference implementations: `test/utils/Scheme1Vectors.sol` from the
+  ScopeLift SDK, `test/utils/FluidkeyVectors.sol` from Fluidkey's stealth-account-kit. The
+  generators are in `script/vectors/`.
+- Running a subset of tests rewrites `snapshots/` without the gas file. Run the full suite before
+  committing, or restore it with `git checkout snapshots/`.
 
 ## Dependencies
 
-| Dependency | Pin | Notes |
-|---|---|---|
-| [ensdomains/namechain](https://github.com/ensdomains/namechain) | `62778d8`, tag `v2-mainnet-deployment-1` (2026-10-02) | ENSv2 contracts and test fixtures |
-| [ensdomains/ens-contracts](https://github.com/ensdomains/ens-contracts) | `121dc23`, the commit namechain pins | resolver interfaces, CCIP-Read helpers |
-| [OpenZeppelin/openzeppelin-contracts](https://github.com/OpenZeppelin/openzeppelin-contracts) | `e4f7021` (v5) and `54b3f14` (v4), as namechain pins | |
-| [foundry-rs/forge-std](https://github.com/foundry-rs/forge-std) | latest at setup | tests only |
+| Dependency | Pin |
+|---|---|
+| [ensdomains/namechain](https://github.com/ensdomains/namechain) | `62778d8`, tag `v2-mainnet-deployment-1` |
+| [ensdomains/ens-contracts](https://github.com/ensdomains/ens-contracts) | `121dc23`, the commit namechain pins |
+| [OpenZeppelin/openzeppelin-contracts](https://github.com/OpenZeppelin/openzeppelin-contracts) | `e4f7021` (v5) and `54b3f14` (v4), as namechain pins |
+| [foundry-rs/forge-std](https://github.com/foundry-rs/forge-std) | latest at setup, tests only |
 
-ens-contracts and OpenZeppelin are used from namechain's own submodules, so their versions cannot
-drift from what ENSv2 is built and audited against. Compiler settings match ENSv2's production
-build: solc 0.8.25, EVM `cancun`, optimizer at 1000 runs. namechain is pinned to its ENSv2 mainnet
-release tag; the Sepolia fork test uses the deployment that tag's `docs/addresses/sepolia.md`
-lists (2026-10-01).
-
-`remappings.txt` mirrors namechain's. Two of namechain's lines (OpenZeppelin v4 for ens-contracts,
-and an `mcopy` variant of ens-contracts' `LibMem`) do not take effect under Foundry in either repo;
-`verify-canonical-build.sh` confirms both builds resolve the same sources.
+ens-contracts and OpenZeppelin come from namechain's own submodules, and the compiler settings match
+ENSv2's production build (solc 0.8.25, EVM `cancun`, optimizer at 1000 runs).
 
 ## Deployment
 
-`script/DeployScheme1Verifier.s.sol` deploys `Scheme1Verifier` through the canonical CREATE2
-deployer with salt `keccak256("ENSIP-30 Scheme1Verifier")`. It has no constructor arguments, so it
-has one address on every chain, and the script does nothing if it is already there:
+Each script deploys through the canonical CREATE2 deployer with a fixed salt, so a contract has one
+address per set of constructor arguments on every chain. Without `--broadcast` a script only
+simulates.
 
 ```bash
 forge script script/DeployScheme1Verifier.s.sol --fork-url $RPC_URL
 ```
 
-`script/DeployFluidkeyVerifier.s.sol` deploys `FluidkeySigners` (owned by `SIGNERS_OWNER`) and
-`FluidkeyVerifier` the same way, with salts `keccak256("ENSIP-30 FluidkeySigners")` and
-`keccak256("ENSIP-30 FluidkeyVerifier")`. Deploy it only once the scheme's ERC declares the ID:
-
 ```bash
 SIGNERS_OWNER=<a> SCHEME_ID=4606769 forge script script/DeployFluidkeyVerifier.s.sol --fork-url $RPC_URL
 ```
 
-`script/Deploy.s.sol` then deploys `StealthResolver` through the canonical CREATE2 deployer
-(`0x4e59b44847b379578588920cA78FbF26c0B4956C`) with salt `keccak256("ENSIP-30 StealthResolver")`.
-The address depends only on the salt, the bytecode and the constructor arguments (ENSv2 root
-registry, verifier, batch gateway provider), so there is one resolver per verifier; pass the
-verifier's printed address as `VERIFIER`. Without `--broadcast` either script only simulates:
-
 ```bash
 ROOT_REGISTRY=<a> VERIFIER=<a> BATCH_GATEWAY_PROVIDER=<a> forge script script/Deploy.s.sol --fork-url $RPC_URL
 ```
+
+There is one `StealthResolver` per verifier. Deploy `FluidkeyVerifier` only once the scheme's ERC
+declares its ID.
 
 ## License
 
