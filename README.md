@@ -167,7 +167,7 @@ without a record.
   caller's, not part of the lookup.
 - **Trust.** The bridge is stateless and has no owner, but it reads through ENS's UniversalResolver
   proxy, which ENS upgrades in place. Its answers depend on ENS's proxy admin, as every lookup
-  through the UniversalResolver does. Deploy it against the proxy, not an implementation.
+  through the UniversalResolver does.
 
 ## Contracts
 
