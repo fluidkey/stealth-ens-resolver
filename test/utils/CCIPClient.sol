@@ -35,8 +35,8 @@ abstract contract CCIPClient is Test {
         view
         returns (bool ok, bytes memory v)
     {
-        (ok, v) =
-            p.sender.staticcall(abi.encodeWithSelector(p.callbackFunction, response, p.extraData));
+        (ok, v) = p.sender
+            .staticcall(abi.encodeWithSelector(p.callbackFunction, response, p.extraData));
     }
 
     /// @dev Full ERC-3668 client: follows lookups (including batch-gateway lookups) to the end.
@@ -73,12 +73,7 @@ abstract contract CCIPClient is Test {
 
     /// @dev The simulated gateways: the stealth gateway answers ENSIP-30 Section 4 step 2,
     ///      the records gateway answers with the ABI-encoded record.
-    function gateway(string memory url, bytes memory)
-        internal
-        view
-        virtual
-        returns (bytes memory)
-    {
+    function gateway(string memory url, bytes memory) internal view virtual returns (bytes memory) {
         if (keccak256(bytes(url)) == keccak256(bytes(STEALTH_GW))) {
             return abi.encode(gwClaimed, gwVerificationData);
         }

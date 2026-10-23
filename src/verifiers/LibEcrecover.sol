@@ -12,7 +12,8 @@ pragma solidity 0.8.25;
 ///      derivation.
 library LibEcrecover {
     /// @dev The secp256k1 group order.
-    uint256 internal constant N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+    uint256 internal constant N =
+        0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
 
     /// @notice The meta-address is not well formed for the scheme (ENSIP-30 Section 1).
     error MalformedMetaAddress();

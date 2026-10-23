@@ -39,7 +39,9 @@ contract MockVerifier is IStealthVerifier {
         address claimed
     ) external view returns (address) {
         if (metaAddress.length == 0) {
-            if (keccak256(verificationData) == keccak256("reject")) revert Rejected();
+            if (keccak256(verificationData) == keccak256("reject")) {
+                revert Rejected();
+            }
             return claimed;
         }
         if (metaAddress.length != 66) revert MalformedMetaAddress();

@@ -10,8 +10,9 @@ contract MockExecutingRecords is IExtendedResolver, ERC165 {
     address public constant STATIC = address(0x5747);
 
     function supportsInterface(bytes4 interfaceId) public view override returns (bool) {
-        return interfaceId == type(IExtendedResolver).interfaceId
-            || super.supportsInterface(interfaceId);
+        return
+            interfaceId == type(IExtendedResolver).interfaceId
+                || super.supportsInterface(interfaceId);
     }
 
     function resolve(bytes calldata, bytes calldata data) external view returns (bytes memory) {

@@ -22,8 +22,9 @@ contract MockRawResolver is IExtendedResolver, ERC165 {
     }
 
     function supportsInterface(bytes4 interfaceId) public view override returns (bool) {
-        return interfaceId == type(IExtendedResolver).interfaceId
-            || super.supportsInterface(interfaceId);
+        return
+            interfaceId == type(IExtendedResolver).interfaceId
+                || super.supportsInterface(interfaceId);
     }
 
     function resolve(bytes calldata, bytes calldata) external view returns (bytes memory) {

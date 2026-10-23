@@ -12,8 +12,10 @@ import {FluidkeyVectors} from "./utils/FluidkeyVectors.sol";
 /// @dev FluidkeyVerifier against derivations by Fluidkey's stealth-account-kit, every rejection,
 ///      and the signatures of both modes.
 contract FluidkeyVerifierTest is Test {
-    uint256 internal constant N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
-    uint256 internal constant P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F;
+    uint256 internal constant N =
+        0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+    uint256 internal constant P =
+        0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F;
     uint256 internal constant FK1 = 0x464B31;
     uint256 internal constant SIGNER_KEY = 0xF1;
 
@@ -150,9 +152,8 @@ contract FluidkeyVerifierTest is Test {
         bytes memory vd
     ) internal returns (bytes4) {
         vm.prank(caller);
-        (bool ok, bytes memory err) = address(verifier).call(
-            abi.encodeCall(FluidkeyVerifier.verify, (n, coinType, meta, vd, address(0xdead)))
-        );
+        (bool ok, bytes memory err) = address(verifier)
+            .call(abi.encodeCall(FluidkeyVerifier.verify, (n, coinType, meta, vd, address(0xdead))));
         return ok ? bytes4(0) : bytes4(err);
     }
 
@@ -376,9 +377,8 @@ contract FluidkeyVerifierTest is Test {
         returns (bytes4)
     {
         vm.prank(caller);
-        (bool ok, bytes memory err) = address(verifier).call(
-            abi.encodeCall(FluidkeyVerifier.verify, (n, coinType, "", vd, c))
-        );
+        (bool ok, bytes memory err) = address(verifier)
+            .call(abi.encodeCall(FluidkeyVerifier.verify, (n, coinType, "", vd, c)));
         return ok ? bytes4(0) : bytes4(err);
     }
 

@@ -8,8 +8,10 @@ import {Scheme1Vectors} from "./utils/Scheme1Vectors.sol";
 
 /// @dev Scheme1Verifier against derivations by the ScopeLift SDK, and every rejection.
 contract Scheme1VerifierTest is Test {
-    uint256 internal constant N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
-    uint256 internal constant P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F;
+    uint256 internal constant N =
+        0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+    uint256 internal constant P =
+        0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F;
     /// @dev x³ + 7 is not a square mod p: no curve point has this x-coordinate.
     uint256 internal constant OFF_CURVE_X = 5;
 
@@ -173,11 +175,7 @@ contract Scheme1VerifierTest is Test {
     }
 
     /// @dev The meta-address with the x-coordinate of the key at `at` replaced.
-    function _withX(bytes memory meta, uint256 at, uint256 x)
-        internal
-        pure
-        returns (bytes memory)
-    {
+    function _withX(bytes memory meta, uint256 at, uint256 x) internal pure returns (bytes memory) {
         return _withWord(meta, at + 1, x);
     }
 }

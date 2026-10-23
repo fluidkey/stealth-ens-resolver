@@ -160,9 +160,7 @@ abstract contract StealthResolverFixture is V1Fixture, V2Fixture, CCIPClient {
         resolver.setMetaAddress(dns(name), value);
     }
 
-    function setChain(address caller, string memory name, uint256 coinType, bool enabled)
-        internal
-    {
+    function setChain(address caller, string memory name, uint256 coinType, bool enabled) internal {
         uint256[] memory coinTypes = new uint256[](1);
         coinTypes[0] = coinType;
         vm.prank(caller);
@@ -181,12 +179,13 @@ abstract contract StealthResolverFixture is V1Fixture, V2Fixture, CCIPClient {
     ///      as ENSIP-30 Section 2 has clients probe it: the query reverts `OffchainLookup` with
     ///      this resolver's stealth callback.
     function isStealthChain(string memory name, uint256 coinType) internal view returns (bool) {
-        (bool ok, bytes memory v) = address(resolver).staticcall(
-            abi.encodeCall(
-                resolver.resolve,
-                (dns(name), abi.encodeCall(IAddressResolver.addr, (node(name), coinType)))
-            )
-        );
+        (bool ok, bytes memory v) = address(resolver)
+            .staticcall(
+                abi.encodeCall(
+                    resolver.resolve,
+                    (dns(name), abi.encodeCall(IAddressResolver.addr, (node(name), coinType)))
+                )
+            );
         if (ok || bytes4(v) != OffchainLookup.selector) return false;
         (,,, bytes4 callback,) = abi.decode(
             BytesUtils.substring(v, 4, v.length - 4), (address, string[], bytes, bytes4, bytes)

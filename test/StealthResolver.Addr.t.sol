@@ -74,8 +74,9 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         view
         returns (address)
     {
-        return
-            abi.decode(resolver.resolve(dns(name), _verifyCall(name, coinType, claimed)), (address));
+        return abi.decode(
+            resolver.resolve(dns(name), _verifyCall(name, coinType, claimed)), (address)
+        );
     }
 
     // Lookup shape (step 1).
@@ -223,8 +224,9 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         vm.prank(alice);
         aliceRecords.setAddress(dns("alice.fkey.eth"), COIN_ETH, abi.encodePacked(aliceStatic));
         setChain(alice, "alice.fkey.eth", COIN_ETH, false);
-        bytes memory v =
-            resolver.resolve(dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode)));
+        bytes memory v = resolver.resolve(
+            dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode))
+        );
         assertEq(abi.decode(v, (address)), aliceStatic);
     }
 
@@ -336,8 +338,9 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         vm.prank(alice);
         aliceRecords.setAddress(dns("alice.fkey.eth"), COIN_ETH, abi.encodePacked(aliceStatic));
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
-        bytes memory v =
-            resolver.resolve(dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode)));
+        bytes memory v = resolver.resolve(
+            dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode))
+        );
         assertEq(abi.decode(v, (address)), aliceStatic);
     }
 
@@ -353,8 +356,9 @@ contract StealthResolverAddrTest is StealthResolverFixture {
         assertEq(uint8(META[0]) & 1, 1, "client-side derivation permitted");
         assertEq(_data(aliceNode, COIN_ETH), META);
         assertFalse(isStealthChain("alice.fkey.eth", COIN_ETH));
-        bytes memory v =
-            resolver.resolve(dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode)));
+        bytes memory v = resolver.resolve(
+            dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode))
+        );
         assertEq(abi.decode(v, (address)), aliceStatic);
     }
 

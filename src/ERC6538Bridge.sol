@@ -62,12 +62,13 @@ contract ERC6538Bridge {
     {
         string memory key =
             string.concat("stealth-meta-address[", Strings.toString(schemeId), "][60]");
-        (bool ok, bytes memory ret) = address(UNIVERSAL_RESOLVER).staticcall(
-            abi.encodeCall(
-                IUniversalResolver.resolve,
-                (name, abi.encodeCall(IDataResolver.data, (NameCoder.namehash(name, 0), key)))
-            )
-        );
+        (bool ok, bytes memory ret) = address(UNIVERSAL_RESOLVER)
+            .staticcall(
+                abi.encodeCall(
+                    IUniversalResolver.resolve,
+                    (name, abi.encodeCall(IDataResolver.data, (NameCoder.namehash(name, 0), key)))
+                )
+            );
         if (!ok || ret.length < 64) return "";
         (bytes memory result,) = abi.decode(ret, (bytes, address));
         bytes memory record = _decodeBytes(result);

@@ -63,13 +63,7 @@ import {IStealthVerifier} from "./interfaces/IStealthVerifier.sol";
 ///      - ENSIP-30 Section 1 record of this resolver's scheme: N's meta-address if the coin type
 ///        is on the chain list, otherwise empty; the same value the callback verifies against.
 ///      - Anything else: forwarded to the records resolver.
-contract StealthResolver is
-    ERC165,
-    IStealthResolver,
-    ICompositeResolver,
-    IERC7996,
-    ResolverCaller
-{
+contract StealthResolver is ERC165, IStealthResolver, ICompositeResolver, IERC7996, ResolverCaller {
     ////////////////////////////////////////////////////////////////////////
     // Types, immutables, storage
     ////////////////////////////////////////////////////////////////////////
@@ -572,9 +566,8 @@ contract StealthResolver is
         view
         returns (uint256 status, uint256 resource)
     {
-        (bool ok, bytes memory v) = address(registry).staticcall(
-            abi.encodeCall(IPermissionedRegistry.getState, (uint256(labelHash)))
-        );
+        (bool ok, bytes memory v) = address(registry)
+            .staticcall(abi.encodeCall(IPermissionedRegistry.getState, (uint256(labelHash))));
         if (!ok || v.length < 160) return (0, 0);
         (status,,,, resource) = abi.decode(v, (uint256, uint256, uint256, uint256, uint256));
     }
@@ -669,11 +662,7 @@ contract StealthResolver is
 
     /// @dev Whether `key` is this scheme's ENSIP-30 Section 1 key in canonical form, and its coin
     ///      type. Non-canonical spellings (`[060]`, `[0x3c]`) are not the record and are forwarded.
-    function _parseStealthKey(string memory key)
-        internal
-        view
-        returns (bool ok, uint256 coinType)
-    {
+    function _parseStealthKey(string memory key) internal view returns (bool ok, uint256 coinType) {
         bytes memory k = bytes(key);
         uint256 start = bytes(_stealthKeyPrefix()).length;
         if (k.length <= start + 1 || k[k.length - 1] != "]") return (false, 0);

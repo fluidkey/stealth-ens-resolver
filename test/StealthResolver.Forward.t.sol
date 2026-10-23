@@ -260,8 +260,9 @@ contract StealthResolverForwardTest is StealthResolverFixture {
         setConfig(alice, "alice.fkey.eth", address(aliceRecords), "");
         vm.prank(alice);
         aliceRecords.setAddress(dns("alice.fkey.eth"), COIN_ETH, abi.encodePacked(address(0xBEEF)));
-        bytes memory v =
-            resolver.resolve(dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode)));
+        bytes memory v = resolver.resolve(
+            dns("alice.fkey.eth"), abi.encodeCall(IAddrResolver.addr, (aliceNode))
+        );
         assertEq(abi.decode(v, (address)), address(0xBEEF));
     }
 
@@ -276,14 +277,16 @@ contract StealthResolverForwardTest is StealthResolverFixture {
             abi.decode(
                 resolver.resolve(name, abi.encodeCall(IAddressResolver.addr, (n, COIN_BASE))),
                 (bytes)
-            ).length,
+            )
+            .length,
             0
         );
         string memory key = stealthKey(COIN_ETH);
         assertEq(
             abi.decode(
                 resolver.resolve(name, abi.encodeCall(IDataResolver.data, (n, key))), (bytes)
-            ).length,
+            )
+            .length,
             0,
             "no stealth record"
         );

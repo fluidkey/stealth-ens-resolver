@@ -11,8 +11,9 @@ contract MockOffchainRecords is IExtendedResolver, ERC165 {
     string public constant URL = "https://gw.records";
 
     function supportsInterface(bytes4 interfaceId) public view override returns (bool) {
-        return interfaceId == type(IExtendedResolver).interfaceId
-            || super.supportsInterface(interfaceId);
+        return
+            interfaceId == type(IExtendedResolver).interfaceId
+                || super.supportsInterface(interfaceId);
     }
 
     function resolve(bytes calldata name, bytes calldata data)
