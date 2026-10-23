@@ -19,4 +19,4 @@ First tagged version. Not audited, not deployed.
 Bytecode hashes are in `bytecode-hashes.json`. Built with Foundry v1.8.6 and solc 0.8.25 (cancun,
 1,000 optimizer runs, no metadata hash), the settings of ENS's canonical ENSv2 contracts.
 
-[0.1.0]: https://github.com/fluidkey/stealth-resolver/releases/tag/v0.1.0
+[0.1.0]: https://github.com/fluidkey/stealth-ens-resolver/releases/tag/v0.1.0
