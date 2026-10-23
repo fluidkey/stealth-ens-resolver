@@ -20,13 +20,16 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v0.3.0
+          version: v1.8.6
 
       - name: Format
         run: forge fmt --check
 
       - name: Build
         run: forge build --sizes
+
+      - name: Lint
+        run: forge lint
 
       - name: Test (fails if gas snapshots change)
         run: forge test -vvv

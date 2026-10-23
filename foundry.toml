@@ -14,6 +14,9 @@ bytecode_hash = "none"
 cbor_metadata = false
 ignored_warnings_from = ["lib/", "test/reference/"]
 fs_permissions = []
+# Each top-level call in a test runs as its own transaction, storage cold, as in a real
+# `eth_call`. The Foundry v1 default, set here because `snapshots/Gas.json` depends on it.
+isolate = true
 
 [profile.ci]
 fuzz = { runs = 1000 }
@@ -24,3 +27,7 @@ line_length = 100
 sort_imports = true
 # Vendored reference code keeps its upstream formatting.
 ignore = ["test/reference/*"]
+
+[lint]
+# Linted in its own CI step, so `forge build` output stays the compiler's.
+lint_on_build = false

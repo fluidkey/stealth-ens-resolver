@@ -1,16 +1,16 @@
 {
-  "ERC6538Bridge_stealthMetaAddressOf_registeredName": "69854",
+  "ERC6538Bridge_stealthMetaAddressOf_registeredName": "115373",
   "FluidkeyVerifier_verify_signed": "14740",
   "FluidkeyVerifier_verify_verified": "27504",
-  "PermissionedResolver_resolveText_direct_reference": "6426",
+  "PermissionedResolver_resolveText_direct_reference": "17426",
   "Scheme1Verifier_verify": "16130",
-  "resolveStealthCallback_unverified": "49267",
-  "resolveStealthCallback_verified_mockVerifier": "30722",
-  "resolve_forwardedText_PermissionedResolver": "43808",
-  "resolve_registeredAddr_offchainLookup": "25007",
-  "resolve_verifyStealthResolution_mockVerifier": "27376",
-  "resolve_wildcardAddr_offchainLookup": "44578",
-  "setChains_oneChain": "91462",
-  "setConfig_recordsResolver_oneUrl": "143403",
-  "setMetaAddress_67bytes": "158933"
+  "resolveStealthCallback_unverified": "74267",
+  "resolveStealthCallback_verified_mockVerifier": "80222",
+  "resolve_forwardedText_PermissionedResolver": "89808",
+  "resolve_registeredAddr_offchainLookup": "64007",
+  "resolve_verifyStealthResolution_mockVerifier": "74876",
+  "resolve_wildcardAddr_offchainLookup": "67078",
+  "setChains_oneChain": "113698",
+  "setConfig_recordsResolver_oneUrl": "166327",
+  "setMetaAddress_67bytes": "182053"
 }

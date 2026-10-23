@@ -193,11 +193,14 @@ from ens-contracts; `LibResolution`, `RegistryRolesLib` and the registry interfa
 | `FluidkeySigners` | 927 | 23,649 |
 | `ERC6538Bridge` | 2,602 | 21,974 |
 
-Gas per path is in `snapshots/Gas.json`, measured by `test/Gas.t.sol` and checked in CI.
+Gas per path is in `snapshots/Gas.json`, measured by `test/Gas.t.sol` and checked in CI. Each
+measured call runs as its own transaction with cold storage (Foundry's `isolate` mode), as an
+`eth_call` does.
 
 ## Build and test
 
-Requires [Foundry](https://book.getfoundry.sh/).
+Requires [Foundry](https://getfoundry.sh/) v1.8.6, the version CI pins; the gas snapshots depend
+on it.
 
 ```bash
 git clone --recurse-submodules <repo>
