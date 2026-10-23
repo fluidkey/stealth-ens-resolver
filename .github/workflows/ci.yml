@@ -44,3 +44,10 @@ jobs:
 
       - name: ENSIP interface sync
         run: ./script/check-ensip-sync.sh
+
+      - name: Bytecode matches VERSION
+        run: ./script/check-bytecode.sh
+
+      - name: Tag matches VERSION
+        if: github.ref_type == 'tag'
+        run: test "${{ github.ref_name }}" = "v$(cat VERSION)"

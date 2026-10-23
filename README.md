@@ -208,6 +208,7 @@ forge build
 forge test
 ./script/verify-canonical-build.sh
 ./script/check-ensip-sync.sh
+./script/check-bytecode.sh
 ```
 
 The tests run on namechain's own ENSv1 and ENSv2 fixtures, including resolution through
@@ -221,6 +222,8 @@ SEPOLIA_RPC_URL=<rpc> MAINNET_RPC_URL=<rpc> forge test --match-path "test/fork/*
 
 - `check-ensip-sync.sh` checks that `IStealthResolver` matches the pinned ENSIP's Section 5
   verbatim (override with `ENSIP_REF`, or point `ENSIP_FILE` at a local draft).
+- `check-bytecode.sh` checks that the deployed contracts' bytecode matches `VERSION`; see
+  [Versions](#versions).
 - `verify-canonical-build.sh` checks that this repo compiles ENS's `PublicResolverV2` byte for byte
   as namechain does.
 - The test vectors come from the reference implementations: `test/utils/Scheme1Vectors.sol` from the
@@ -265,6 +268,31 @@ UNIVERSAL_RESOLVER=<a> forge script script/DeployERC6538Bridge.s.sol --fork-url 
 
 There is one `StealthResolver` per verifier. Deploy `FluidkeyVerifier` only once the scheme's ERC
 declares its ID.
+
+## Versions
+
+The repo has one version, in `VERSION`, tagged `vX.Y.Z` with a GitHub release and listed in
+[CHANGELOG.md](CHANGELOG.md). The contracts are immutable and deployed with CREATE2, so changed
+bytecode is a new contract at a new address, never an upgrade in place. State does not carry over: a
+name moves by writing its config and records on the new `StealthResolver` and setting it as its
+resolver.
+
+| Bump | When |
+|---|---|
+| MAJOR | A change that breaks integrators: interfaces, record or `verificationData` formats, ENSIP-30 behaviour. Before 1.0.0, MINOR. |
+| MINOR | Any other change to a deployed contract's bytecode, constructor included. |
+| PATCH | No bytecode change: docs, tests, scripts, tooling. |
+
+`bytecode-hashes.json` records keccak256 of each deployed contract's creation and runtime code for
+the current version, and CI fails when they differ. After a contract change, bump `VERSION`, add the
+CHANGELOG entry with the contracts that changed, and record the new hashes:
+
+```bash
+./script/check-bytecode.sh --update
+```
+
+The script refuses to record changed bytecode under the same version or a patch bump. A tag must
+match `VERSION`. A release that is deployed lists its addresses per chain in its release notes.
 
 ## License
 

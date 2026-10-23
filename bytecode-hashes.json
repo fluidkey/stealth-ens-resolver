@@ -1,0 +1,25 @@
+{
+  "version": "0.1.0",
+  "contracts": {
+    "StealthResolver": {
+      "initcode": "0xedae5f531306b28a0d6f6e298a00aba50f570def77eaba7854b61f14e059b3ef",
+      "runtime": "0x3fd40aa0ff89326da4439892f570ae75cb70ad083de4af75e0c4ad04c0d294db"
+    },
+    "Scheme1Verifier": {
+      "initcode": "0x739e1bf84de2ec9197b1b4ee750ca44d5d433bd55747f820a1aa9452b8f73dd8",
+      "runtime": "0xbb866495d67adb33ef147abea215e572c855fcaa10d19ebeeaeb5f6d3160c4f9"
+    },
+    "FluidkeySigners": {
+      "initcode": "0xaf38c8313cff3398e27e85570c1ff45b9451f243127ca8fa72c86f7926061a25",
+      "runtime": "0xee13ca7c7057173d333244ff1810121ba441ad878b62e08e87ac3e51dfe0b653"
+    },
+    "FluidkeyVerifier": {
+      "initcode": "0x972de6489961fe055f07c8e88384c0f5bc01e04d8046f803623c18925e4a470b",
+      "runtime": "0x0525c428175e7f07a3630e7957213a64cccc461ac3893a3ade845465c78816ef"
+    },
+    "ERC6538Bridge": {
+      "initcode": "0x7d2624be0fb0c88b65b871efe5b28375152440496b18a7ea3be2e1c4bcebf1c1",
+      "runtime": "0x9c491fa35d56c996479cc44d7cfe4a0583a54216814d8fe54d39e1209f633ec1"
+    }
+  }
+}
