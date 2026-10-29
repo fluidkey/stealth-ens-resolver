@@ -123,8 +123,9 @@ recipient never finds the payment. A failed item comes back as error data, marke
 |---|---|---|---|
 | `Scheme1Verifier` | ERC-5564 scheme 1, as the ScopeLift stealth-address SDK derives it | `P_spend ‖ P_view`, 66 bytes | `e ‖ S.x ‖ S.y`, 96 bytes |
 | `FluidkeyVerifier` | Fluidkey stealth Safe, FK1 (`0x464B31`), as stealth-account-kit 1.1.1 derives it: a counterfactual 1-of-1 Safe 1.3.0 | `P_spend ‖ configHash`, 65 bytes | verified: `e ‖ S.x ‖ S.y ‖ signature`, 161 bytes; unverified: `abi.encode(uint64 expires, bytes signature)` |
+| `CloakedVerifier` | Cloaked stealth EOA, as clkd-stealth 1.1.1 derives it: FK1's owner key, without the Safe | `P_spend`, 33 bytes | as FK1 |
 
-Both verifiers check the derivation with two `ecrecover` calls (`LibEcrecover`, tested against the
+The verifiers check the derivation with two `ecrecover` calls (`LibEcrecover`, tested against the
 construction Chainlink's VRF verifier uses), with no curve library. `verificationData` contains the
 ephemeral private key: combined with one leaked stealth private key it gives the spending key, so
 stealth keys need the same care as the spending key. With no meta-address, `Scheme1Verifier`
@@ -150,6 +151,21 @@ FK1:
   Chain yet; this relies on its address being deployable only by Fluidkey's multisig.
 - **Detection.** FK1 records keep the client-side derivation flag clear: Fluidkey finds payments by
   regenerating its own ephemeral keys and cannot detect payments a sender derived.
+
+Cloaked:
+
+- **Derivation.** `S = e·P_spend`, stealth address = `address(keccak256(S.x ‖ S.y)·P_spend)`, an EOA
+  that Cloaked's client spends from with the key `p_spend·keccak256(S.x ‖ S.y)` and delegates with
+  EIP-7702 on first use. The viewing key is not part of the derivation: Cloaked's server derives `e`
+  from the recipient's child viewing node and finds payments by regenerating those keys, so records
+  keep the client-side derivation flag clear, as FK1's do.
+- **Signed in both modes,** as FK1, by a signer listed in `CloakedSigners`, which Cloaked owns, with
+  the EIP-712 domain `CloakedVerifier`. A FK1 signature is not a Cloaked one.
+- **Chains.** No chain list: a name gets answers on the chains Cloaked's gateway signs for. An EOA is
+  the same address with the same key on every EVM chain, so a default answer reaches the recipient
+  on any of them.
+- **Scheme ID.** Not declared yet. It is a constructor argument; the tests use `0x434C4B31` (ASCII
+  "CLK1") as a placeholder.
 
 ## Reading a meta-address onchain
 
@@ -179,6 +195,8 @@ without a record.
 | `verifiers/Scheme1Verifier` | ERC-5564 scheme 1 |
 | `verifiers/FluidkeyVerifier` | Fluidkey stealth Safe, FK1 |
 | `verifiers/FluidkeySigners` | Fluidkey gateway signers for FK1, owned by Fluidkey |
+| `verifiers/CloakedVerifier` | Cloaked stealth EOA |
+| `verifiers/CloakedSigners` | Cloaked gateway signers, owned by Cloaked |
 | `verifiers/LibEcrecover` | secp256k1 `a·G + b·Q` on `ecrecover`, shared by the verifiers |
 | `ERC6538Bridge` | A name's meta-address in ERC-6538's shape, read through the UniversalResolver |
 
@@ -191,6 +209,8 @@ from ens-contracts; `LibResolution`, `RegistryRolesLib` and the registry interfa
 | `Scheme1Verifier` | 1,657 | 22,919 |
 | `FluidkeyVerifier` | 5,543 | 19,033 |
 | `FluidkeySigners` | 927 | 23,649 |
+| `CloakedVerifier` | 4,047 | 20,529 |
+| `CloakedSigners` | 927 | 23,649 |
 | `ERC6538Bridge` | 2,602 | 21,974 |
 
 Gas per path is in `snapshots/Gas.json`, measured by `test/Gas.t.sol` and checked in CI. Each
@@ -228,7 +248,9 @@ SEPOLIA_RPC_URL=<rpc> MAINNET_RPC_URL=<rpc> forge test --match-path "test/fork/*
   as namechain does.
 - The test vectors come from the reference implementations: `test/utils/Scheme1Vectors.sol` from the
   ScopeLift SDK, `test/utils/FluidkeyVectors.sol` from Fluidkey's stealth-account-kit. The
-  generators are in `script/vectors/`.
+  generators are in `script/vectors/`. `test/utils/CloakedVectors.sol` holds the known answers in
+  clkd-stealth's own tests (`genStealthAddress` and the end-to-end flow), with the ephemeral keys
+  the flow does not publish recomputed by `script/vectors/cloaked.py`.
 - Running a subset of tests rewrites `snapshots/` without the gas file. Run the full suite before
   committing, or restore it with `git checkout snapshots/`.
 
@@ -259,6 +281,10 @@ SIGNERS_OWNER=<a> SCHEME_ID=4606769 forge script script/DeployFluidkeyVerifier.s
 ```
 
 ```bash
+SIGNERS_OWNER=<a> SCHEME_ID=<id> forge script script/DeployCloakedVerifier.s.sol --fork-url $RPC_URL
+```
+
+```bash
 ROOT_REGISTRY=<a> VERIFIER=<a> BATCH_GATEWAY_PROVIDER=<a> forge script script/Deploy.s.sol --fork-url $RPC_URL
 ```
 
@@ -266,8 +292,8 @@ ROOT_REGISTRY=<a> VERIFIER=<a> BATCH_GATEWAY_PROVIDER=<a> forge script script/De
 UNIVERSAL_RESOLVER=<a> forge script script/DeployERC6538Bridge.s.sol --fork-url $RPC_URL
 ```
 
-There is one `StealthResolver` per verifier. Deploy `FluidkeyVerifier` only once the scheme's ERC
-declares its ID.
+There is one `StealthResolver` per verifier. Deploy `FluidkeyVerifier` and `CloakedVerifier` only
+once their schemes' IDs are declared.
 
 ## Versions
 

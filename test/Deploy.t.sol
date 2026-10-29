@@ -2,12 +2,15 @@
 pragma solidity 0.8.25;
 
 import {Deploy} from "../script/Deploy.s.sol";
+import {DeployCloakedVerifier} from "../script/DeployCloakedVerifier.s.sol";
 import {DeployERC6538Bridge} from "../script/DeployERC6538Bridge.s.sol";
 import {DeployFluidkeyVerifier} from "../script/DeployFluidkeyVerifier.s.sol";
 import {DeployScheme1Verifier} from "../script/DeployScheme1Verifier.s.sol";
 
 import {ERC6538Bridge} from "../src/ERC6538Bridge.sol";
 import {StealthResolver} from "../src/StealthResolver.sol";
+import {CloakedSigners} from "../src/verifiers/CloakedSigners.sol";
+import {CloakedVerifier} from "../src/verifiers/CloakedVerifier.sol";
 import {FluidkeySigners} from "../src/verifiers/FluidkeySigners.sol";
 import {FluidkeyVerifier} from "../src/verifiers/FluidkeyVerifier.sol";
 import {Scheme1Verifier} from "../src/verifiers/Scheme1Verifier.sol";
@@ -27,6 +30,23 @@ contract DeployTest is StealthResolverFixture {
         assertEq(address(deployed.SIGNERS()), address(signers));
         assertEq(deployed.schemeId(), 4606769);
         (FluidkeySigners again, FluidkeyVerifier againVerifier) = script.run();
+        assertEq(address(again), address(signers));
+        assertEq(address(againVerifier), address(deployed));
+    }
+
+    /// @dev Registry and verifier at their predicted addresses; a second run deploys nothing.
+    function test_deployCloakedVerifier_atPredictedAddresses() public {
+        address owner = makeAddr("cloaked");
+        vm.setEnv("SIGNERS_OWNER", vm.toString(owner));
+        vm.setEnv("SCHEME_ID", "1129073457");
+        DeployCloakedVerifier script = new DeployCloakedVerifier();
+        (CloakedSigners signers, CloakedVerifier deployed) = script.run();
+        assertEq(address(signers), script.predictSigners(owner));
+        assertEq(address(deployed), script.predictVerifier(1129073457, signers));
+        assertEq(signers.owner(), owner);
+        assertEq(address(deployed.SIGNERS()), address(signers));
+        assertEq(deployed.schemeId(), 1129073457);
+        (CloakedSigners again, CloakedVerifier againVerifier) = script.run();
         assertEq(address(again), address(signers));
         assertEq(address(againVerifier), address(deployed));
     }

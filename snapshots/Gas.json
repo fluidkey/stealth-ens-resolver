@@ -1,4 +1,6 @@
 {
+  "CloakedVerifier_verify_signed": "14707",
+  "CloakedVerifier_verify_verified": "23210",
   "ERC6538Bridge_stealthMetaAddressOf_registeredName": "115373",
   "FluidkeyVerifier_verify_signed": "14740",
   "FluidkeyVerifier_verify_verified": "27504",

@@ -5,6 +5,14 @@ Versions follow [Semantic Versioning](https://semver.org/) as described under
 deployed contract, which means a new deployment at a new address; a PATCH release never does.
 Each release lists the contracts whose bytecode changed.
 
+## [0.2.0] - Unreleased
+
+### Contracts
+
+- Added `CloakedVerifier` and `CloakedSigners`: the Cloaked stealth EOA scheme, as clkd-stealth
+  1.1.1 derives it. Scheme ID not declared yet.
+- No other contract's bytecode changed.
+
 ## [0.1.0] - 2026-10-23
 
 First tagged version. Not audited, not deployed.
@@ -19,4 +27,5 @@ First tagged version. Not audited, not deployed.
 Bytecode hashes are in `bytecode-hashes.json`. Built with Foundry v1.8.6 and solc 0.8.25 (cancun,
 1,000 optimizer runs, no metadata hash), the settings of ENS's canonical ENSv2 contracts.
 
+[0.2.0]: https://github.com/fluidkey/stealth-ens-resolver/releases/tag/v0.2.0
 [0.1.0]: https://github.com/fluidkey/stealth-ens-resolver/releases/tag/v0.1.0

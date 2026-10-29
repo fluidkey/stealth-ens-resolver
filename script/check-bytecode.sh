@@ -11,7 +11,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONTRACTS=(StealthResolver Scheme1Verifier FluidkeySigners FluidkeyVerifier ERC6538Bridge)
+CONTRACTS=(StealthResolver Scheme1Verifier FluidkeySigners FluidkeyVerifier CloakedSigners CloakedVerifier ERC6538Bridge)
 
 current="{"
 for c in "${CONTRACTS[@]}"; do
